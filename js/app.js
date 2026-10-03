@@ -105,10 +105,10 @@ function renderStudents() {
     table('students-tbody', 6, state.students.filter(s => [s.StudentName, s.Nickname, s.ParentName, s.Phone].some(v => String(v).toLowerCase().includes(q))).map(s => `<tr><td>${esc(s.StudentName)}</td><td>${esc(s.Nickname)}</td><td>${esc(s.ParentName)}</td><td>${esc(s.Phone)}</td><td>${badge(s.Active ? 'ใช้งาน' : 'ระงับ')}</td><td>${editButton('student', s.StudentID)}</td></tr>`).join(''), ['students']); updateButtons();
 }
 function renderEnrollments() {
-    table('enrollments-tbody', 7, state.enrollments.map(e => {
+    table('enrollments-tbody', 8, state.enrollments.map(e => {
         const p = D.enrollmentProgress(e, state);
         const progress = hasData('schedule') ? `${p.completed} / ${p.target} Session<br><small>เหลือ ${p.remaining} Session · เรียนแล้ว ${num(p.usedHours)} ชม.</small>` : 'รอข้อมูลตารางเรียน';
-        return `<tr><td>${esc(nameOf(e))}<small class="subtext">${esc(dateText(e.EnrollDate))}</small></td><td>${esc(e.Course)}</td><td>${esc(e.Level)}</td><td>${badge(e.EnrollmentStatus)}</td><td>${badge(e.PaymentStatus)}</td><td>${progress}</td><td>${editButton('enrollment', e.EnrollmentID)}</td></tr>`;
+        return `<tr><td>${esc(nameOf(e))}<small class="subtext">${esc(dateText(e.EnrollDate))}</small></td><td>${esc(e.Course)}</td><td>${esc(e.Level)}</td><td>${badge(e.EnrollmentStatus)}</td><td>${badge(e.PaymentStatus)}</td><td>${progress}</td><td>${editButton('enrollment', e.EnrollmentID)}</td><td>${['ชำระแล้ว','ชำระเงินแล้ว'].includes(String(e.PaymentStatus).trim()) ? `<button type="button" class="btn btn-secondary btn-sm" data-enrollment-receipt="${esc(e.EnrollmentID)}">${globalThis.BostonReceipts?.hasReceipt(e.EnrollmentID) ? 'ดูใบเสร็จ' : 'ออกใบเสร็จ'}</button>` : '—'}</td></tr>`;
     }).join(''), ['students', 'courses', 'enrollments']);
 }
 function renderCourses() { table('courses-tbody', 5, state.courses.map(c => `<tr><td>${esc(c.Course)}</td><td>${esc(c.Level)}</td><td>${num(c.TotalHours)} ชม.</td><td>${num(c.SessionCount)} ครั้ง</td><td>${badge(c.Active ? 'ใช้งาน' : 'ระงับ')}</td></tr>`).join(''), ['courses']); }
