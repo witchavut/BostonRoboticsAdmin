@@ -3,6 +3,8 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbyE4ZEXNnTrqec6xnBRgabR
 const D = BostonDomain, state = { students: [], courses: [], enrollments: [], schedule: [], holidays: [] };
 const labels = { students: 'นักเรียน', courses: 'หลักสูตร', enrollments: 'ลงทะเบียนเรียน', schedule: 'ตารางเรียน', holidays: 'วันหยุด' };
 let ready = {}, errors = {}, token = '', modernAPI = false, busy = false, loading = false;
+let sessionGeneration = 0;
+const activeRequests = new Set();
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = value => Number(value || 0).toLocaleString('th-TH', { maximumFractionDigits: 2 });
@@ -28,64 +30,82 @@ function updateButtons() {
     $('refresh-data').disabled = busy || loading; $('logout-button').disabled = busy;
 }
 async function request(action, payload, post = false) {
-    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 25000);
+    const requestToken = token, generation = sessionGeneration;
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 45000);
+    activeRequests.add(controller);
     try {
         const options = { signal: controller.signal, cache: 'no-store', redirect: 'follow' };
-        if (post) Object.assign(options, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload, token }) });
+        if (post) Object.assign(options, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload, token: requestToken }) });
         const response = await fetch(post ? API_URL : `${API_URL}?action=${encodeURIComponent(action)}`, options);
         if (!response.ok) throw new Error(`ติดต่อระบบไม่สำเร็จ (${response.status})`);
         const raw = await response.text(); let result;
-        try { result = JSON.parse(raw); } catch { throw new Error('API ยังไม่รองรับคำสั่งนี้ กรุณาอัปเดต Apps Script'); }
-        if (result.code === 'UNAUTHORIZED') { logout(false); throw new Error('กรุณาเข้าสู่ระบบอีกครั้ง'); }
+        try { result = JSON.parse(raw); } catch { throw new Error('ไม่ได้รับข้อมูล JSON จาก Apps Script กรุณาตรวจสอบ URL และสิทธิ์เข้าถึง deployment'); }
+        if (!result || typeof result !== 'object') throw new Error('รูปแบบข้อมูลจาก Apps Script ไม่ถูกต้อง');
+        if (result.code === 'UNAUTHORIZED') {
+            if (requestToken && generation === sessionGeneration && token === requestToken) {
+                logout(false); statusMessage('เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง', 'error');
+            }
+            throw new Error('กรุณาเข้าสู่ระบบอีกครั้ง');
+        }
         if (!result.success && !['CONFLICT', 'HOLIDAY'].includes(result.code)) throw new Error(result.message || 'ระบบไม่สามารถทำรายการได้');
         return result;
     } catch (error) {
         if (action.startsWith('save') && (error.name === 'AbortError' || error instanceof TypeError)) throw new Error('ยังยืนยันผลบันทึกไม่ได้ กรุณาโหลดข้อมูลใหม่ก่อนบันทึกซ้ำ');
         if (error.name === 'AbortError') throw new Error('การเชื่อมต่อใช้เวลานานเกินไป กรุณาลองใหม่');
         throw error;
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); activeRequests.delete(controller); }
 }
 async function initApp() {
+    if (loading || busy) return;
     loading = true; updateButtons(); statusMessage('กำลังตรวจสอบการเชื่อมต่อ…');
+    modernAPI = false; $('login-panel').hidden = true;
     try {
         const health = await request('getHealth'); modernAPI = health.version === '2.0';
-        if (!modernAPI) throw new Error('กรุณาอัปเดต Apps Script');
+        if (!modernAPI) throw new Error(health.version ? `Apps Script รุ่น ${health.version} ยังไม่รองรับ กรุณาใช้ Code.gs รุ่น 2.0 และ Deploy > New version` : 'ตรวจสอบรุ่น Apps Script ไม่สำเร็จ กรุณาตรวจสอบ URL และ deployment');
         $('login-panel').hidden = false;
         statusMessage(health.configured ? 'กรุณาเข้าสู่ระบบผู้ดูแล' : 'ต้องตั้งค่า ADMIN_PASSWORD ใน Apps Script ก่อนเข้าสู่ระบบ', health.configured ? 'info' : 'error');
-    } catch {
-        modernAPI = false; await loadData();
+    } catch (error) {
+        modernAPI = false; statusMessage(`ตรวจสอบการเชื่อมต่อไม่สำเร็จ: ${error.message} • กดโหลดข้อมูลใหม่เพื่อลองอีกครั้ง`, 'error');
     } finally { loading = false; renderAll(); }
 }
 async function login(event) {
-    event.preventDefault(); $('login-button').disabled = true; $('login-error').textContent = '';
+    event.preventDefault(); if (loading || busy || !modernAPI) return;
+    loading = true; updateButtons(); $('login-button').disabled = true; $('login-error').textContent = '';
     try {
         const result = await request('login', { password: $('admin-password').value }, true);
-        token = result.token; $('admin-password').value = ''; $('login-panel').hidden = true; $('logout-button').hidden = false; await loadData();
+        if (typeof result.token !== 'string' || !result.token) throw new Error('ไม่ได้รับเซสชันเข้าสู่ระบบ กรุณาลองใหม่');
+        token = result.token; sessionGeneration++; $('admin-password').value = ''; $('login-panel').hidden = true; $('logout-button').hidden = false;
+        loading = false; await loadData();
     } catch (error) { $('login-error').textContent = error.message; }
-    finally { $('login-button').disabled = false; }
+    finally { loading = false; $('login-button').disabled = false; updateButtons(); }
 }
 function logout(send = true) {
     if (busy && send) return;
+    sessionGeneration++; activeRequests.forEach(controller => controller.abort());
     if (send && token) request('logout', {}, true).catch(() => {});
-    token = ''; Object.keys(state).forEach(k => state[k] = []); ready = {}; errors = {};
+    token = ''; loading = false; Object.keys(state).forEach(k => state[k] = []); ready = {}; errors = {};
     document.querySelectorAll('.modal.show').forEach(m => m.classList.remove('show'));
     $('login-panel').hidden = !modernAPI; $('logout-button').hidden = true; statusMessage('ออกจากระบบแล้ว'); renderAll();
 }
 async function loadData() {
-    if (modernAPI && !token) return;
+    if (loading || busy || !modernAPI || !token) return;
     loading = true; errors = {}; ready = {}; renderAll(); statusMessage('กำลังโหลดข้อมูล…');
-    const currentToken = token;
-    await Promise.all(Object.keys(state).map(async key => {
+    const generation = sessionGeneration;
+    // Avoid starting five Apps Script executions at once on a cold deployment.
+    for (const key of Object.keys(state)) {
         try {
-            const result = await request('get' + key[0].toUpperCase() + key.slice(1), {}, modernAPI);
-            if (modernAPI && token !== currentToken) return;
+            const result = await request('get' + key[0].toUpperCase() + key.slice(1), {}, true);
+            if (generation !== sessionGeneration) return;
             if (!Array.isArray(result.data)) throw new Error('รูปแบบข้อมูลไม่ถูกต้อง');
             state[key] = D.normalize(key, result.data); ready[key] = true;
-        } catch (error) { errors[key] = error.message; state[key] = []; }
-    }));
+        } catch (error) {
+            if (generation !== sessionGeneration) return;
+            errors[key] = error.message; state[key] = [];
+        }
+    }
     loading = false; const failed = Object.keys(errors);
     const detail = failed.map(k => `${labels[k]}: ${errors[k]}`).join(' • ');
-    statusMessage(!modernAPI ? `Apps Script ยังเป็นรุ่นเดิม ต้องอัปเดต Code.gs ก่อนบันทึก • ${detail || 'แสดงข้อมูลที่อ่านได้เท่านั้น'}` : detail || 'เชื่อมต่อแล้ว • คำนวณชั่วโมงตามเวลาไทย', failed.length || !modernAPI ? 'error' : 'success');
+    statusMessage(detail || 'เชื่อมต่อแล้ว • คำนวณชั่วโมงตามเวลาไทย', failed.length ? 'error' : 'success');
     renderAll();
 }
 function scheduleStatus(s) { return !s.Date || !s.EndTime ? 'ตรวจสอบวันเวลา' : D.completed(s) ? 'ครบเวลานัดแล้ว' : 'ยังไม่ครบเวลานัด'; }
