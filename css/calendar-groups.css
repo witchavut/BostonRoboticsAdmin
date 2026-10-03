@@ -1,0 +1,39 @@
+/* One time slot per row; each learner retains their own course and session. */
+.calendar-card { overflow-x: auto; }
+.calendar-header, .calendar-message { position: sticky; left: 0; }
+.calendar-week, .calendar-days { min-width: 840px; }
+.calendar-time-group { display: block; width: 100%; min-width: 0; padding-top: 3px; }
+.calendar-time-label { display: block; margin: 0 0 2px; color: #334155; font-size: 11px; font-weight: 600; line-height: 1.5; }
+.calendar-group-course { display: block; margin: 0 0 5px; color: #475569; font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.calendar-time-students { display: grid; grid-template-columns: repeat(var(--calendar-group-columns), minmax(0, 1fr)); align-items: stretch; gap: 3px; }
+.calendar-time-students .calendar-event { height: 100%; padding: 5px 3px; border-left-width: 2px; }
+.calendar-time-students .calendar-event b,
+.calendar-time-students .calendar-event span { display: block; overflow: visible; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; -webkit-line-clamp: unset; }
+.calendar-time-students .calendar-event b { font-size: 10px; line-height: 1.5; }
+.calendar-time-students .calendar-event .calendar-session { margin-top: 3px; font-size: 9px; line-height: 1.4; }
+.calendar-time-students .calendar-event .calendar-level { margin-top: 2px; font-size: 9px; line-height: 1.4; color: #475569; }
+.calendar-time-students .calendar-event .calendar-course { display: block; margin-top: 3px; font-size: 9px; line-height: 1.4; color: #475569; }
+.calendar-time-group + .calendar-time-group { margin-top: 3px; padding-top: 6px; border-top: 1px solid #e2e8f0; }
+.calendar-day.holiday .calendar-time-label { color: #9f1239; }
+.calendar-day.holiday .calendar-time-group + .calendar-time-group { border-top-color: #fda4af; }
+
+#calendar-day-modal .modal-content { max-width: 880px; }
+.calendar-day-time-group + .calendar-day-time-group { margin-top: 22px; }
+.calendar-day-time-label { margin: 0 0 10px; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; font-size: 1rem; color: #334155; }
+.calendar-day-students { display: grid; grid-template-columns: repeat(var(--calendar-group-columns), minmax(0, 1fr)); gap: 10px; align-items: stretch; }
+.calendar-day-students .calendar-detail { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.calendar-day-students .calendar-detail:only-child { grid-column: 1 / -1; }
+.calendar-day-students .calendar-detail > p { font-size: .85rem; }
+.calendar-day-students .calendar-detail .btn { margin-top: auto; align-self: flex-start; }
+
+@media (max-width: 768px) {
+    .calendar-time-label { font-size: 11px; }
+    .calendar-day { padding: 6px; }
+    #calendar-day-modal .modal-header { gap: 12px; align-items: flex-start; }
+    #calendar-day-modal .modal-header h2 { font-size: 1rem; }
+    #calendar-day-modal .modal-body { padding: 14px; }
+    .calendar-day-students { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+    .calendar-day-students { grid-template-columns: 1fr; }
+}

@@ -5,6 +5,7 @@ const labels = { students: 'นักเรียน', courses: 'หลักส
 let ready = {}, errors = {}, modernAPI = false, busy = false, loading = false;
 let calendarMonth = D.today().slice(0, 7), selectedCalendarDate = '';
 let enrollmentRequestId = '';
+let scheduleSearch = null, exportingSchedule = false;
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = value => Number(value || 0).toLocaleString('th-TH', { maximumFractionDigits: 2 });
@@ -27,6 +28,7 @@ function table(id, cols, rows, keys, empty = 'ยังไม่มีข้อ�
 function statusMessage(text, kind = 'info') { $('connection-status').textContent = text; $('connection-status').className = `connection-status ${kind}`; }
 function updateButtons() {
     document.querySelectorAll('[data-write], [data-edit]').forEach(b => b.disabled = !canWrite());
+    document.querySelectorAll('[data-export-schedule]').forEach(b => b.disabled = exportingSchedule || busy || loading || !hasData('students', 'courses', 'enrollments', 'schedule'));
     $('refresh-data').disabled = busy || loading;
     document.querySelectorAll('#enrollment-modal .input-form, #schedule-modal .input-form').forEach(input => {
         input.disabled = busy || ['enr-id', 'sch-duration'].includes(input.id) || (input.id === 'enr-session-count' && $('enr-mode').value === 'edit');
@@ -116,6 +118,7 @@ function updateScheduleEnrollmentDropdown() {
     select.replaceChildren(new Option('-- เลือกนักเรียน --', ''));
     D.studentGroups(state).filter(group => group.enrollments.length && D.studentName(group.student).toLowerCase().includes(q)).forEach(group => select.add(new Option(D.studentName(group.student), group.student.StudentID)));
     select.value = previous; if (select.selectedIndex < 0) select.value = '';
+    scheduleSearch?.refresh();
 }
 function renderScheduleView() {
     const selected = student($('sch-select-student').value);
@@ -127,8 +130,26 @@ function renderScheduleView() {
         const p = D.enrollmentProgress(e, state);
         const rows = p.sessions.map(s => `<tr><td>${sessionText(s)}</td><td>${esc(dateText(s.Date))}</td><td>${esc(s.StartTime)}–${esc(s.EndTime)}</td><td>${num(s.Duration)} ชม.</td><td>${badge(scheduleStatus(s))}</td><td>${esc(s.Note)}</td><td>${editButton('schedule', s.ScheduleID)}</td></tr>`).join('');
         const finished = e.EnrollmentStatus === 'จบหลักสูตร';
-        return `<section class="student-enrollment-group"><div class="page-header"><div><h3>${esc(e.Course)} / ${esc(e.Level)}</h3><span class="subtext">ลงทะเบียน ${esc(dateText(e.EnrollDate))} · ${esc(e.PaymentStatus)}</span></div>${badge(e.EnrollmentStatus)}</div><div class="level-progress"><span>เรียนแล้ว ${p.completed} / ${p.target} Session</span><strong>${finished ? 'จบหลักสูตรแล้ว' : `เหลือ ${p.remaining} Session`}</strong><span>นัดแล้ว ${p.scheduled} ครั้ง · ยังไม่นัด ${p.unbooked} ครั้ง</span></div><div class="table-container"><table class="data-table"><thead><tr><th>Session</th><th>วันที่</th><th>เวลา</th><th>ระยะเวลา</th><th>สถานะ</th><th>หมายเหตุ</th><th>จัดการ</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty-state">ยังไม่มีนัดเรียน</td></tr>'}</tbody></table></div>${!finished && e.EnrollmentStatus !== 'ยกเลิก' && p.unbooked > 0 ? `<button type="button" class="btn btn-primary" data-write data-add-schedule="${esc(e.EnrollmentID)}">เพิ่มนัดเรียน ${esc(e.Level)}</button>` : ''}</section>`;
+        return `<section class="student-enrollment-group"><div class="page-header"><div><h3>${esc(e.Course)} / ${esc(e.Level)}</h3><span class="subtext">ลงทะเบียน ${esc(dateText(e.EnrollDate))} · ${esc(e.PaymentStatus)}</span></div>${badge(e.EnrollmentStatus)}</div><div class="level-progress"><span>เรียนแล้ว ${p.completed} / ${p.target} Session</span><strong>${finished ? 'จบหลักสูตรแล้ว' : `เหลือ ${p.remaining} Session`}</strong><span>นัดแล้ว ${p.scheduled} ครั้ง · ยังไม่นัด ${p.unbooked} ครั้ง</span></div><div class="enrollment-actions"><button type="button" class="btn btn-primary" data-export-schedule="${esc(e.EnrollmentID)}" aria-label="ดาวน์โหลด PNG ${esc(e.Course)} ${esc(e.Level)}"><i class="fas fa-download" aria-hidden="true"></i> ดาวน์โหลดตารางเรียน PNG</button></div><div class="table-container"><table class="data-table"><thead><tr><th>Session</th><th>วันที่</th><th>เวลา</th><th>ระยะเวลา</th><th>สถานะ</th><th>หมายเหตุ</th><th>จัดการ</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty-state">ยังไม่มีนัดเรียน</td></tr>'}</tbody></table></div>${!finished && e.EnrollmentStatus !== 'ยกเลิก' && p.unbooked > 0 ? `<button type="button" class="btn btn-primary" data-write data-add-schedule="${esc(e.EnrollmentID)}">เพิ่มนัดเรียน ${esc(e.Level)}</button>` : ''}</section>`;
     }).join(''); updateButtons();
+}
+async function downloadStudentSchedule(enrollmentId) {
+    if (exportingSchedule || busy || loading || !hasData('students', 'courses', 'enrollments', 'schedule')) return;
+    const selected = student($('sch-select-student').value);
+    const enrollment = selected && D.studentEnrollments(selected.StudentID, state).find(e => e.EnrollmentID === enrollmentId);
+    if (!enrollment) return;
+    const status = $('schedule-export-status'), now = new Date();
+    exportingSchedule = true; updateButtons(); status.textContent = 'กำลังสร้างภาพตารางเรียน…';
+    try {
+        const progress = D.enrollmentProgress(enrollment, state, now);
+        await BostonScheduleExport.download({
+            student: { ...student(enrollment.StudentID) }, enrollment: { ...enrollment }, course: { ...course(enrollment) },
+            progress: { ...progress, sessions: progress.sessions.map(s => ({ ...s })) }, now, logoUrl: 'assets/boston-logo.png'
+        });
+        status.textContent = `ดาวน์โหลด PNG ${enrollment.Course} / ${enrollment.Level} แล้ว`;
+    } catch (error) {
+        status.textContent = `สร้างภาพไม่สำเร็จ: ${error.message} กรุณาลองอีกครั้ง`;
+    } finally { exportingSchedule = false; updateButtons(); }
 }
 function sessionText(s) { const n = D.sessionNumber(s); return n ? `Session ${n}` : 'ยังไม่ระบุ Session'; }
 function changeCalendarMonth(delta) {
@@ -141,28 +162,45 @@ function calendarDateLabel(date) {
 }
 function calendarEvent(s) {
     const enrollment = state.enrollments.find(e => e.EnrollmentID === s.EnrollmentID);
+    const learner = student(enrollment?.StudentID);
     const color = course(enrollment || {})?.ColorHex;
     return {
-        name: nameOf(enrollment), course: enrollment ? `${enrollment.Course} / ${enrollment.Level}` : 'ไม่พบหลักสูตร',
+        name: nameOf(enrollment), shortName: learner?.Nickname || nameOf(enrollment),
+        course: enrollment ? `${enrollment.Course} / ${enrollment.Level}` : 'ไม่พบหลักสูตร',
+        courseName: enrollment?.Course || '', level: enrollment?.Level || '',
         color: /^#[0-9a-f]{6}$/i.test(color || '') ? color : '#2563eb'
     };
+}
+function calendarTimeGroups(sessions) {
+    const groups = new Map();
+    [...sessions].sort((a, b) => `${a.Date}|${a.StartTime}|${a.EndTime}|${a.ScheduleID}`.localeCompare(`${b.Date}|${b.StartTime}|${b.EndTime}|${b.ScheduleID}`)).forEach(session => {
+        const key = `${session.Date}|${session.StartTime}|${session.EndTime}`;
+        if (!groups.has(key)) groups.set(key, { date: session.Date, start: session.StartTime, end: session.EndTime, sessions: [] });
+        groups.get(key).sessions.push(session);
+    });
+    return [...groups.values()];
 }
 function renderCalendar() {
     const [year, month] = calendarMonth.split('-').map(Number);
     $('calendar-month').textContent = new Intl.DateTimeFormat('th-TH', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, 1)));
     const keys = ['students', 'courses', 'enrollments', 'schedule', 'holidays'];
     const available = hasData(...keys), today = D.today();
-    const sessions = available ? state.schedule.filter(s => D.validSchedule(s, state)).sort((a, b) => `${a.StartTime}${a.ScheduleID}`.localeCompare(`${b.StartTime}${b.ScheduleID}`)) : [];
+    const groups = available ? calendarTimeGroups(state.schedule.filter(s => D.validSchedule(s, state))) : [];
     $('calendar-message').textContent = loading ? 'กำลังโหลดตารางเรียน…' : !available ? 'ยังโหลดตารางเรียนไม่ครบ กรุณากดโหลดข้อมูลใหม่' : 'เลือกวันที่เพื่อดูรายการนัดเรียนทั้งหมด';
     $('calendar-days').innerHTML = D.calendarDays(calendarMonth).map(date => {
-        const own = sessions.filter(s => s.Date === date);
+        const own = groups.filter(group => group.date === date), appointmentCount = own.reduce((sum, group) => sum + group.sessions.length, 0);
         const holidays = available ? state.holidays.filter(h => h.Active && h.Date === date) : [];
         const limit = holidays.length ? 2 : 3;
-        const events = own.slice(0, limit).map(s => {
-            const info = calendarEvent(s);
-            return `<span class="calendar-event" style="--event-color:${info.color};--event-bg:${info.color}12"><b>${esc(info.name)}</b><span class="calendar-session">${sessionText(s)}</span><span>${esc(s.StartTime)}–${esc(s.EndTime)}</span><span class="calendar-course">${esc(info.course)}</span></span>`;
+        const events = own.slice(0, limit).map(group => {
+            const entries = group.sessions.map(s => ({ session: s, info: calendarEvent(s) }));
+            const sharedCourse = entries.every(entry => entry.info.courseName === entries[0].info.courseName) ? entries[0].info.courseName : '';
+            const learners = entries.map(({ session: s, info }) => {
+                const shortSession = D.sessionNumber(s) ? `ครั้ง ${D.sessionNumber(s)}` : 'ไม่ระบุครั้ง';
+                return `<span class="calendar-event" style="--event-color:${info.color};--event-bg:${info.color}12" title="${esc(`${info.name} · ${info.course} · ${sessionText(s)}`)}"><b>${esc(info.shortName)}</b>${sharedCourse ? `<span class="calendar-level">${esc(info.level)}</span>` : `<span class="calendar-course">${esc(info.course)}</span>`}<span class="calendar-session">${shortSession}</span></span>`;
+            }).join('');
+            return `<span class="calendar-time-group"><span class="calendar-time-label">${esc(group.start)}–${esc(group.end)}</span>${sharedCourse ? `<span class="calendar-group-course">${esc(sharedCourse)}</span>` : ''}<span class="calendar-time-students" style="--calendar-group-columns:${Math.min(3, group.sessions.length)}">${learners}</span></span>`;
         }).join('');
-        return `<button type="button" class="calendar-day${date.slice(0, 7) !== calendarMonth ? ' outside' : ''}${date === today ? ' today' : ''}${holidays.length ? ' holiday' : ''}" data-calendar-date="${date}" ${date === today ? 'aria-current="date"' : ''} aria-label="${esc(calendarDateLabel(date))}${available ? `, ${own.length} นัดเรียน` : ', รอข้อมูล'}${holidays.length ? ', วันหยุด' : ''}"><span class="calendar-day-number">${Number(date.slice(-2))}</span>${holidays.map(h => `<span class="calendar-holiday">${esc(h.Reason)}</span>`).join('')}${events}${own.length > limit ? `<span class="calendar-more">+${own.length - limit} รายการ</span>` : ''}</button>`;
+        return `<button type="button" class="calendar-day${date.slice(0, 7) !== calendarMonth ? ' outside' : ''}${date === today ? ' today' : ''}${holidays.length ? ' holiday' : ''}" data-calendar-date="${date}" ${date === today ? 'aria-current="date"' : ''} aria-label="${esc(calendarDateLabel(date))}${available ? `, ${appointmentCount} นัดเรียน` : ', รอข้อมูล'}${holidays.length ? ', วันหยุด' : ''}"><span class="calendar-day-number">${Number(date.slice(-2))}</span>${holidays.map(h => `<span class="calendar-holiday">${esc(h.Reason)}</span>`).join('')}${events}${own.length > limit ? `<span class="calendar-more">+${own.length - limit} ช่วงเวลา</span>` : ''}</button>`;
     }).join('');
     if (selectedCalendarDate && $('calendar-day-modal').classList.contains('show')) renderCalendarDay();
 }
@@ -172,10 +210,13 @@ function renderCalendarDay() {
         $('calendar-day-list').innerHTML = '<p class="empty-state">ยังโหลดข้อมูลไม่ครบ กรุณาโหลดข้อมูลใหม่</p>'; return;
     }
     const holidays = state.holidays.filter(h => h.Active && h.Date === selectedCalendarDate);
-    const sessions = state.schedule.filter(s => s.Date === selectedCalendarDate && D.validSchedule(s, state)).sort((a, b) => a.StartTime.localeCompare(b.StartTime));
-    $('calendar-day-list').innerHTML = holidays.map(h => `<p class="calendar-holiday-detail">วันหยุด: ${esc(h.Reason)}</p>`).join('') + (sessions.length ? sessions.map(s => {
-        const info = calendarEvent(s);
-        return `<article class="calendar-detail" style="--event-color:${info.color}"><strong>${esc(s.StartTime)}–${esc(s.EndTime)} · ${esc(info.name)}</strong><p>${esc(info.course)} · ${sessionText(s)}</p>${s.Note ? `<p class="subtext">${esc(s.Note)}</p>` : ''}<button type="button" data-write data-calendar-edit="${esc(s.ScheduleID)}" class="btn btn-primary btn-sm" ${canWrite() ? '' : 'disabled'}>แก้ไขเวลาเรียน</button></article>`;
+    const groups = calendarTimeGroups(state.schedule.filter(s => s.Date === selectedCalendarDate && D.validSchedule(s, state)));
+    $('calendar-day-list').innerHTML = holidays.map(h => `<p class="calendar-holiday-detail">วันหยุด: ${esc(h.Reason)}</p>`).join('') + (groups.length ? groups.map(group => {
+        const learners = group.sessions.map(s => {
+            const info = calendarEvent(s);
+            return `<article class="calendar-detail" style="--event-color:${info.color}"><strong>${esc(info.name)}</strong><p>${esc(info.course)} · ${sessionText(s)}</p>${s.Note ? `<p class="subtext">${esc(s.Note)}</p>` : ''}<button type="button" data-write data-calendar-edit="${esc(s.ScheduleID)}" class="btn btn-primary btn-sm" ${canWrite() ? '' : 'disabled'}>แก้ไขเวลาเรียน</button></article>`;
+        }).join('');
+        return `<section class="calendar-day-time-group"><h3 class="calendar-day-time-label">${esc(group.start)}–${esc(group.end)}</h3><div class="calendar-day-students" style="--calendar-group-columns:${Math.min(3, group.sessions.length)}">${learners}</div></section>`;
     }).join('') : '<p class="empty-state">ไม่มีนัดเรียนในวันนี้</p>');
 }
 function openCalendarDay(date) { selectedCalendarDate = date; renderCalendarDay(); openModal('calendar-day-modal'); }
@@ -322,14 +363,23 @@ async function submitSchedule() {
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.nav-links a').forEach(link => link.addEventListener('click', e => { e.preventDefault(); document.querySelectorAll('.nav-links a, .page-section').forEach(el => el.classList.remove('active')); link.classList.add('active'); $(link.dataset.target).classList.add('active'); $('sidebar').classList.remove('open'); }));
     $('menu-toggle').addEventListener('click', () => $('sidebar').classList.toggle('open')); $('search-student').addEventListener('input', renderStudents);
-    $('search-schedule').addEventListener('input', () => { updateScheduleEnrollmentDropdown(); renderScheduleView(); });
+    scheduleSearch = BostonStudentSearch.create({
+        input: $('search-schedule'), list: $('schedule-student-options'), status: $('schedule-search-status'),
+        getItems: () => D.studentGroups(state).filter(group => group.enrollments.length).map(group => ({ id: group.student.StudentID, label: D.studentName(group.student) })),
+        onQueryChange: () => { $('sch-select-student').value = ''; $('schedule-export-status').textContent = ''; updateScheduleEnrollmentDropdown(); renderScheduleView(); },
+        onSelect: item => { updateScheduleEnrollmentDropdown(); $('sch-select-student').value = item.id; renderScheduleView(); }
+    });
     $('refresh-data').addEventListener('click', () => modernAPI ? loadData() : initApp());
     $('calendar-prev').addEventListener('click', () => changeCalendarMonth(-1));
     $('calendar-next').addEventListener('click', () => changeCalendarMonth(1));
     $('calendar-today').addEventListener('click', () => { calendarMonth = D.today().slice(0, 7); renderCalendar(); });
     $('calendar-days').addEventListener('click', event => { const day = event.target.closest('[data-calendar-date]'); if (day) openCalendarDay(day.dataset.calendarDate); });
     $('calendar-day-list').addEventListener('click', event => { const button = event.target.closest('[data-calendar-edit]'); if (button) editCalendarSchedule(button.dataset.calendarEdit); });
-    $('sch-enrollment-groups').addEventListener('click', event => { const button = event.target.closest('[data-add-schedule]'); if (button) openScheduleModal('add', null, button.dataset.addSchedule); });
+    $('sch-enrollment-groups').addEventListener('click', event => {
+        const exportButton = event.target.closest('[data-export-schedule]');
+        if (exportButton) { downloadStudentSchedule(exportButton.dataset.exportSchedule); return; }
+        const button = event.target.closest('[data-add-schedule]'); if (button) openScheduleModal('add', null, button.dataset.addSchedule);
+    });
     $('confirm-room').addEventListener('click', () => finishConflict(true)); $('cancel-room').addEventListener('click', () => finishConflict(false));
     document.addEventListener('click', event => { const b = event.target.closest('[data-edit]'); if (b) ({ student: openStudentModal, enrollment: openEnrollmentModal, schedule: openScheduleModal, holiday: openHolidayModal })[b.dataset.edit]('edit', b.dataset.id); if (event.target.classList.contains('modal') && event.target.id !== 'conflict-modal') closeModal(event.target.id); });
     document.addEventListener('keydown', event => {

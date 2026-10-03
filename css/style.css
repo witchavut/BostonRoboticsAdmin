@@ -441,3 +441,5 @@ body {
     .level-progress { padding: 0 14px 16px; }
     .course-counts { grid-template-columns: 1fr; }
 }
+
+.enrollment-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
