@@ -1,6 +1,9 @@
 {
   "name": "boston-robotics-admin",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
-  "scripts": { "test": "node --test tests/*.test.cjs", "preview": "node tools/preview.cjs" }
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "preview": "node tools/preview.cjs"
+  }
 }
