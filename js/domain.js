@@ -135,7 +135,11 @@
         (state.enrollments || []).forEach(e => {
             if (!validEnrollment(e, state)) return;
             const key = students.get(e.StudentID);
-            if (e.EnrollmentStatus === 'ทดลองเรียน') trials.add(key);
+            if (e.EnrollmentStatus === 'ทดลองเรียน') {
+                const trial = enrollmentProgress(e, state, now);
+                // Keep trials awaiting a booking; completed appointments remain in lifetime attendance.
+                if (trial.scheduled === 0 || trial.upcoming > 0) trials.add(key);
+            }
             if (e.EnrollmentStatus !== 'กำลังเรียน' || enrollmentProgress(e, state, now).remaining === 0) return;
             active.add(key);
             const courseKey = textKey(e.Course);
