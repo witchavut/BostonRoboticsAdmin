@@ -6,7 +6,7 @@
     <title>BostonRobotics AdminSystem</title>
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="css/style.css?v=2.1.0">
+    <link rel="stylesheet" href="css/style.css?v=2.2.0">
 </head>
 <body>
     <div class="mobile-header">
@@ -36,12 +36,13 @@
         <section id="dashboard" class="page-section">
             <h1 class="page-title">ภาพรวมระบบ (Dashboard)</h1>
             <div class="dashboard-cards">
-                <div class="card card-blue"><h3>นักเรียนทั้งหมด</h3><p id="dash-total-students">0 คน</p></div>
-                <div class="card card-green"><h3>กำลังเรียน</h3><p id="dash-active-students">0 คน</p></div>
+                <div class="card card-blue"><h3>นักเรียนทั้งหมด</h3><p id="dash-total-students">0 คน</p><span class="subtext">นักเรียนทุกคนที่เคยมีตารางเรียน</span></div>
+                <div class="card card-green"><h3>กำลังเรียน</h3><p id="dash-active-students">0 คน</p><span class="subtext">ยังไม่จบหลักสูตร รวมผู้ที่ยังไม่ชำระเงิน ไม่รวมทดลองเรียน</span></div>
                 <div class="card card-warning"><h3>ทดลองเรียน</h3><p id="dash-trial-students">0 คน</p></div>
                 <div class="card card-danger"><h3>ยังไม่ชำระเงิน</h3><p id="dash-unpaid">0 รายการ</p></div>
                 <div class="card card-purple"><h3>วันนี้มีเรียน</h3><p id="dash-today-classes">0 คลาส</p></div>
             </div>
+            <div id="dash-active-courses" class="course-counts" aria-label="จำนวนนักเรียนที่กำลังเรียนแยกตามหลักสูตร"></div>
             <h2 class="section-title">ตารางเรียนวันนี้</h2>
             <div class="table-container">
                 <table class="data-table">
@@ -96,33 +97,23 @@
                 <div class="calendar-week" aria-hidden="true"><span>จ.</span><span>อ.</span><span>พ.</span><span>พฤ.</span><span>ศ.</span><span class="saturday">ส.</span><span class="sunday">อา.</span></div>
                 <div id="calendar-days" class="calendar-days"></div>
             </div>
-            <h2 class="section-title schedule-management-title">จัดการนัดเรียนรายนักเรียน</h2>
+            <h2 class="section-title schedule-management-title">รายการนัดเรียนรายบุคคล</h2>
             
             <div class="form-group" style="max-width: 400px; margin-bottom: 25px;">
-                <label>เลือกนักเรียนและหลักสูตร</label>
-                <input id="search-schedule" class="input-form" type="search" placeholder="ค้นหาชื่อนักเรียนหรือหลักสูตร" aria-label="ค้นหาชื่อนักเรียนหรือหลักสูตร"><select id="sch-select-enrollment" class="input-form" onchange="renderScheduleView()">
+                <label for="search-schedule">ค้นหาชื่อนักเรียน</label>
+                <input id="search-schedule" class="input-form" type="search" placeholder="ค้นหาชื่อนักเรียน" aria-label="ค้นหาชื่อนักเรียน">
+                <select id="sch-select-student" class="input-form" aria-label="เลือกชื่อนักเรียน" onchange="renderScheduleView()">
                     <option value="">-- กรุณาเลือก --</option>
                 </select>
             </div>
 
             <!-- จะแสดงก็ต่อเมื่อเลือก Dropdown แล้ว -->
             <div id="sch-management-container" style="display:none;">
-                <div class="dashboard-cards" style="margin-bottom: 20px;">
-                    <div class="card card-blue"><h3>ชั่วโมงทั้งหมด</h3><p id="sch-info-total">0 ชม.</p></div>
-                    <div class="card card-green"><h3>หักชั่วโมงแล้ว</h3><p id="sch-info-completed">0 / 0 ชม. (0%)</p></div>
-                    <div class="card card-purple"><h3>ชั่วโมงคงเหลือ</h3><p id="sch-info-remaining">—</p></div><div class="card card-warning"><h3>จำนวนครั้งที่นัด</h3><p id="sch-info-session">0 / 0</p></div>
-                </div>
-
                 <div class="page-header">
-                    <h2>รายการนัดเรียน</h2>
-                    <button data-write class="btn btn-primary" onclick="openScheduleModal('add')"><i class="fas fa-plus"></i> เพิ่มนัดเรียน</button>
+                    <h2>รายการนัดเรียนและแก้ไขเวลาเรียน</h2>
                 </div>
-                <div class="table-container">
-                    <table class="data-table">
-                        <thead><tr><th>ครั้งที่</th><th>วันที่</th><th>เวลา</th><th>ระยะเวลา</th><th>สถานะ</th><th>หมายเหตุ</th><th>จัดการ</th></tr></thead>
-                        <tbody id="schedule-tbody"></tbody>
-                    </table>
-                </div>
+                <div id="sch-student-summary" class="dashboard-cards"></div>
+                <div id="sch-enrollment-groups"></div>
             </div>
         </section>
 
@@ -163,7 +154,47 @@
     <div id="student-modal" class="modal"><div class="modal-content"><div class="modal-header"><h2 id="stu-modal-title">ข้อมูลนักเรียน</h2><span class="close" onclick="closeModal('student-modal')">&times;</span></div><div class="modal-body"><input type="hidden" id="stu-mode" value="add"><input type="hidden" id="stu-id"><div class="form-group"><label for="stu-name">ชื่อ-นามสกุล</label><input type="text" id="stu-name" class="input-form"></div><div class="form-group"><label for="stu-nickname">ชื่อเล่น</label><input type="text" id="stu-nickname" class="input-form"></div><div class="form-group"><label for="stu-note">หมายเหตุ</label><input id="stu-note" class="input-form" type="text"></div><div class="form-group"><label for="stu-parent">ชื่อผู้ปกครอง</label><input type="text" id="stu-parent" class="input-form"></div><div class="form-group"><label for="stu-phone">เบอร์โทรศัพท์</label><input type="text" id="stu-phone" class="input-form"></div><div class="form-group"><label for="stu-active">สถานะ</label><select id="stu-active" class="input-form"><option value="true">ใช้งาน (Active)</option><option value="false">ระงับ (Inactive)</option></select></div></div><div class="modal-footer"><span id="stu-loading" style="display:none; color:var(--color-blue); margin-right:15px;"><i class="fas fa-spinner fa-spin"></i> บันทึก...</span><button class="btn btn-secondary" onclick="closeModal('student-modal')">ยกเลิก</button><button data-write class="btn btn-primary" id="btn-save-student" onclick="submitStudent()">บันทึก</button></div></div></div>
 
     <!-- Enrollment Modal -->
-    <div id="enrollment-modal" class="modal"><div class="modal-content"><div class="modal-header"><h2 id="enr-modal-title">ลงทะเบียนเรียน</h2><span class="close" onclick="closeModal('enrollment-modal')">&times;</span></div><div class="modal-body"><input type="hidden" id="enr-mode" value="add"><div class="form-group"><label for="enr-id">รหัส (Auto)</label><input type="text" id="enr-id" class="input-form" disabled></div><div class="form-group"><label for="enr-student">นักเรียน</label><select id="enr-student" class="input-form"></select></div><div class="form-group"><label for="enr-course">หลักสูตร (Course)</label><select id="enr-course" class="input-form" onchange="updateLevelDropdown()"></select></div><div class="form-group"><label for="enr-level">ระดับ (Level)</label><select id="enr-level" class="input-form"></select></div><div class="form-group"><label for="enr-status">สถานะ</label><select id="enr-status" class="input-form"><option value="กำลังเรียน">กำลังเรียน</option><option value="ทดลองเรียน">ทดลองเรียน</option><option value="จบหลักสูตร">จบหลักสูตร</option><option value="ยกเลิก">ยกเลิก</option></select></div><div class="form-group"><label for="enr-note">หมายเหตุ</label><input id="enr-note" class="input-form" type="text"></div><div class="form-group"><label for="enr-payment">การชำระเงิน</label><select id="enr-payment" class="input-form"><option value="ชำระแล้ว">ชำระแล้ว</option><option value="ยังไม่ชำระ">ยังไม่ชำระ</option><option value="ชำระบางส่วน">ชำระบางส่วน</option><option value="ไม่คิดค่าเรียน">ไม่คิดค่าเรียน</option></select></div></div><div class="modal-footer"><span id="enr-loading" style="display:none; color:var(--color-blue); margin-right:15px;"><i class="fas fa-spinner fa-spin"></i> บันทึก...</span><button class="btn btn-secondary" onclick="closeModal('enrollment-modal')">ยกเลิก</button><button data-write class="btn btn-primary" id="btn-save-enr" onclick="submitEnrollment()">บันทึก</button></div></div></div>
+    <div id="enrollment-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="enr-modal-title">
+        <div class="modal-content enrollment-modal-content">
+            <div class="modal-header"><h2 id="enr-modal-title">ลงทะเบียนเรียน</h2><span class="close" onclick="closeModal('enrollment-modal')">&times;</span></div>
+            <div class="modal-body">
+                <input type="hidden" id="enr-mode" value="add">
+                <div class="form-group"><label for="enr-id">รหัส (Auto)</label><input type="text" id="enr-id" class="input-form" disabled></div>
+                <div class="form-group"><label for="enr-student">นักเรียน</label><select id="enr-student" class="input-form"></select></div>
+                <div class="form-group"><label for="enr-course">หลักสูตร (Course)</label><select id="enr-course" class="input-form" onchange="updateLevelDropdown()"></select></div>
+                <div class="form-group"><label for="enr-level">ระดับ (Level)</label><select id="enr-level" class="input-form" onchange="updateEnrollmentSessionDefaults()"></select></div>
+                <div class="form-group"><label for="enr-status">สถานะ</label><select id="enr-status" class="input-form"><option value="กำลังเรียน">กำลังเรียน</option><option value="ทดลองเรียน">ทดลองเรียน</option><option value="พักการเรียน">พักการเรียน</option><option value="จบหลักสูตร">จบหลักสูตร</option><option value="ยกเลิก">ยกเลิก</option></select></div>
+                <div class="form-group"><label for="enr-payment">การชำระเงิน</label><select id="enr-payment" class="input-form"><option value="ชำระแล้ว">ชำระแล้ว</option><option value="ยังไม่ชำระ">ยังไม่ชำระ</option><option value="ชำระบางส่วน">ชำระบางส่วน</option><option value="ไม่คิดค่าเรียน">ไม่คิดค่าเรียน</option></select></div>
+                <div class="form-group"><label for="enr-note">หมายเหตุ</label><input id="enr-note" class="input-form" type="text"></div>
+                <div class="form-group">
+                    <label for="enr-session-count">จำนวน Session</label>
+                    <select id="enr-session-count" class="input-form" onchange="renderEnrollmentSessions()">
+                        <option value="1">1 Session</option>
+                        <option value="2">2 Sessions</option>
+                        <option value="3">3 Sessions</option>
+                        <option value="4">4 Sessions</option>
+                        <option value="5">5 Sessions</option>
+                        <option value="6">6 Sessions</option>
+                        <option value="7">7 Sessions</option>
+                        <option value="8">8 Sessions</option>
+                        <option value="9">9 Sessions</option>
+                        <option value="10">10 Sessions</option>
+                        <option value="11">11 Sessions</option>
+                        <option value="12">12 Sessions</option>
+                        <option value="13">13 Sessions</option>
+                        <option value="14">14 Sessions</option>
+                        <option value="15">15 Sessions</option>
+                    </select>
+                </div>
+                <section id="enr-sessions-section" aria-label="วันและเวลาเรียนแต่ละ Session">
+                    <p>เลือกวันและเวลาเรียนแต่ละ Session</p>
+                    <p id="enr-sessions-hint" class="subtext" role="status"></p>
+                    <div id="enr-sessions"></div>
+                </section>
+            </div>
+            <div class="modal-footer"><span id="enr-loading" style="display:none; color:var(--color-blue); margin-right:15px;"><i class="fas fa-spinner fa-spin"></i> บันทึก...</span><button class="btn btn-secondary" onclick="closeModal('enrollment-modal')">ยกเลิก</button><button data-write class="btn btn-primary" id="btn-save-enr" onclick="submitEnrollment()">บันทึก</button></div>
+        </div>
+    </div>
 
     <!-- Schedule Modal -->
     <div id="schedule-modal" class="modal">
@@ -172,10 +203,11 @@
             <div class="modal-body">
                 <input type="hidden" id="sch-mode" value="add">
                 <input type="hidden" id="sch-id">
+                <input type="hidden" id="sch-enrollment-id">
                 <div class="form-group"><label for="sch-date">วันที่</label><input type="date" id="sch-date" class="input-form"></div>
                 <div style="display:flex; gap:10px;">
-                    <div class="form-group" style="flex:1;"><label for="sch-start">เวลาเริ่ม</label><input type="time" id="sch-start" class="input-form" onchange="calcDuration()"></div>
-                    <div class="form-group" style="flex:1;"><label for="sch-end">เวลาจบ</label><input type="time" id="sch-end" class="input-form" onchange="calcDuration()"></div>
+                    <div class="form-group" style="flex:1;"><label for="sch-start">เวลาเริ่ม</label><select id="sch-start" class="input-form" onchange="calcDuration()"></select></div>
+                    <div class="form-group" style="flex:1;"><label for="sch-end">เวลาจบ</label><select id="sch-end" class="input-form" onchange="calcDuration()"></select></div>
                 </div>
                 <div class="form-group"><label for="sch-duration">ระยะเวลา (ชั่วโมง) คำนวณอัตโนมัติ</label><input type="text" id="sch-duration" class="input-form" disabled></div>
                 <div class="form-group"><label for="sch-note">หมายเหตุ</label><input type="text" id="sch-note" class="input-form"></div>
@@ -214,7 +246,7 @@
             <div class="modal-footer"><button id="cancel-room" class="btn btn-secondary">ยกเลิก</button> <button id="confirm-room" class="btn btn-primary">ยืนยันและบันทึก</button></div>
         </div>
     </div>
-    <script src="js/domain.js?v=2.1.0"></script>
-    <script src="js/app.js?v=2.1.0"></script>
+    <script src="js/domain.js?v=2.2.0"></script>
+    <script src="js/app.js?v=2.2.0"></script>
 </body>
 </html>

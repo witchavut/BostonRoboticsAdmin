@@ -183,6 +183,21 @@ body {
 .card-danger { border-color: var(--color-danger); }
 .card-purple { border-color: #8B5CF6; }
 
+.course-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: -12px 0 30px; }
+.course-counts > h3, .course-counts > h2, .course-counts > .empty-state { grid-column: 1 / -1; }
+.course-counts .card { padding: 16px 20px; }
+.course-counts .card p { font-size: 1.35rem; }
+.course-count { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #fff; border: 1px solid var(--color-border); border-radius: 10px; padding: 14px 18px; }
+.course-count strong { color: var(--color-success); white-space: nowrap; }
+.student-enrollment-group { margin-bottom: 24px; background: #fff; border: 1px solid var(--color-border); border-radius: 12px; overflow: hidden; }
+.student-enrollment-group > .page-header, .student-enrollment-group > header { padding: 18px 20px 0; }
+.student-enrollment-group h3 { font-size: 1.1rem; color: var(--color-navy); }
+.student-enrollment-group .table-container { border-radius: 0; box-shadow: none; }
+.level-progress { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; color: var(--color-text-light); font-size: .9rem; padding: 0 20px 18px; }
+.level-progress strong { color: var(--color-text-main); }
+#sch-student-summary { margin-bottom: 20px; }
+#sch-management-container > .page-header h2 { font-size: 1.15rem; }
+
 /* ===================== TABLES ===================== */
 .table-container {
     background: var(--color-card);
@@ -311,6 +326,16 @@ body {
     box-shadow: 0 10px 25px rgba(0,0,0,0.1);
 }
 
+.enrollment-modal-content { max-width: 760px; }
+#enr-sessions-section { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--color-border); }
+#enr-sessions-hint { margin-bottom: 14px; }
+#enr-sessions { display: flex; flex-direction: column; gap: 12px; }
+.enrollment-session-row { display: grid; grid-template-columns: minmax(90px, .6fr) minmax(150px, 1.5fr) minmax(110px, 1fr) minmax(110px, 1fr); align-items: end; gap: 12px; padding: 14px; background: #f8fafc; border: 1px solid var(--color-border); border-radius: 8px; }
+.enrollment-session-row > strong, .enrollment-session-row > .session-label { align-self: center; color: var(--color-navy); font-size: .9rem; }
+.enrollment-session-row .form-group { min-width: 0; margin-bottom: 0; }
+.enrollment-session-row label { display: block; margin-bottom: 5px; color: var(--color-text-light); font-size: .85rem; }
+.enrollment-session-row .input-form { min-width: 0; }
+
 .modal-header {
     padding: 15px 20px;
     border-bottom: 1px solid var(--color-border);
@@ -380,12 +405,16 @@ body {
 .calendar-day.outside { background: #fafbfd; color: #94a3b8; }
 .calendar-day.today { box-shadow: inset 0 0 0 2px var(--color-blue); }
 .calendar-day:hover { background: #f0f6ff; }
+.calendar-day.holiday, .calendar-day.holiday.outside { background: #ffe4e9; color: #b91c1c; }
+.calendar-day.holiday:hover { background: #ffd5dd; }
+.calendar-day.holiday .calendar-day-number, .calendar-day.holiday .calendar-more { color: #b91c1c; }
 .calendar-day:focus-visible, .calendar-navigation button:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; z-index: 1; }
 .calendar-day-number { font-size: 13px; font-weight: 600; }
 .calendar-event { display: block; width: 100%; min-width: 0; border-left: 3px solid var(--event-color); border-radius: 6px; padding: 5px 6px; background: var(--event-bg); color: #1e293b; font-size: 11px; line-height: 1.4; }
 .calendar-event b, .calendar-event span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-event span { font-size: 10px; }
-.calendar-holiday { display: block; background: #fff1f2; color: #be123c; border-radius: 5px; padding: 3px 5px; font-size: 11px; overflow-wrap: anywhere; }
+.calendar-event .calendar-session { margin-top: 3px; color: #334155; font-size: 10px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+.calendar-holiday { display: block; background: #fecdd3; color: #b91c1c; border-radius: 5px; padding: 4px 5px; font-size: 11px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
 .calendar-more { font-size: 11px; color: #475569; }
 .calendar-holiday-detail { background: #fff1f2; color: #be123c; padding: 12px; border-radius: 8px; margin-bottom: 12px; }
 .calendar-detail { border-left: 4px solid var(--event-color); padding: 12px; margin-bottom: 12px; background: #f8fafc; border-radius: 8px; }
@@ -401,7 +430,14 @@ body {
     .calendar-event { padding: 4px 2px; border-left-width: 2px; }
     .calendar-event b { font-size: 10px; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
     .calendar-event span { font-size: 8px; }
+    .calendar-event .calendar-session { font-size: 9px; line-height: 1.3; }
     .calendar-event .calendar-course { display: none; }
-    .calendar-holiday { font-size: 9px; padding: 2px; }
+    .calendar-holiday { font-size: 10px; padding: 3px 2px; }
     .calendar-more { font-size: 9px; }
+    .enrollment-session-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; }
+    .enrollment-session-row > strong, .enrollment-session-row > .session-label { grid-column: 1 / -1; }
+    .enrollment-session-row > .form-group:first-of-type { grid-column: 1 / -1; }
+    .student-enrollment-group > .page-header, .student-enrollment-group > header { padding: 16px 14px 0; }
+    .level-progress { padding: 0 14px 16px; }
+    .course-counts { grid-template-columns: 1fr; }
 }

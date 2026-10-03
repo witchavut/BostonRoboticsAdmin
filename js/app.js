@@ -1,9 +1,10 @@
 'use strict';
 const API_URL = 'https://script.google.com/macros/s/AKfycbyE4ZEXNnTrqec6xnBRgabR3B28DZ3hbnxIrrzngv-547-eCRPthMg1Gy2BHhOHtaQ1ng/exec';
-const D = BostonDomain, state = { students: [], courses: [], enrollments: [], schedule: [], holidays: [] };
-const labels = { students: 'นักเรียน', courses: 'หลักสูตร', enrollments: 'ลงทะเบียนเรียน', schedule: 'ตารางเรียน', holidays: 'วันหยุด' };
+const D = BostonDomain, state = { students: [], courses: [], enrollments: [], schedule: [], holidays: [], timeSlots: [] };
+const labels = { students: 'นักเรียน', courses: 'หลักสูตร', enrollments: 'ลงทะเบียนเรียน', schedule: 'ตารางเรียน', holidays: 'วันหยุด', timeSlots: 'ช่วงเวลาเรียน' };
 let ready = {}, errors = {}, modernAPI = false, busy = false, loading = false;
 let calendarMonth = D.today().slice(0, 7), selectedCalendarDate = '';
+let enrollmentRequestId = '';
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = value => Number(value || 0).toLocaleString('th-TH', { maximumFractionDigits: 2 });
@@ -27,6 +28,9 @@ function statusMessage(text, kind = 'info') { $('connection-status').textContent
 function updateButtons() {
     document.querySelectorAll('[data-write], [data-edit]').forEach(b => b.disabled = !canWrite());
     $('refresh-data').disabled = busy || loading;
+    document.querySelectorAll('#enrollment-modal .input-form, #schedule-modal .input-form').forEach(input => {
+        input.disabled = busy || ['enr-id', 'sch-duration'].includes(input.id) || (input.id === 'enr-session-count' && $('enr-mode').value === 'edit');
+    });
 }
 async function request(action, payload, post = false) {
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 45000);
@@ -40,7 +44,7 @@ async function request(action, payload, post = false) {
         if (!result || typeof result !== 'object') throw new Error('รูปแบบข้อมูลจาก Apps Script ไม่ถูกต้อง');
         if (result.code === 'UNAUTHORIZED') {
             modernAPI = false;
-            throw new Error('Apps Script ยังบังคับเข้าสู่ระบบ กรุณาแทน Code.gs ด้วยรุ่น 2.1 และ Deploy > New version');
+            throw new Error('กรุณาแทน Code.gs ด้วยรุ่น 2.2 และ Deploy > New version');
         }
         if (!result.success && !['CONFLICT', 'HOLIDAY'].includes(result.code)) throw new Error(result.message || 'ระบบไม่สามารถทำรายการได้');
         return result;
@@ -55,8 +59,8 @@ async function initApp() {
     loading = true; renderAll(); statusMessage('กำลังตรวจสอบการเชื่อมต่อ…');
     modernAPI = false;
     try {
-        const health = await request('getHealth'); modernAPI = health.version === '2.1' && health.authMode === 'none';
-        if (!modernAPI) throw new Error(health.version ? `Apps Script รุ่น ${health.version} ยังไม่รองรับหน้าเว็บนี้ กรุณาใช้ Code.gs รุ่น 2.1 และ Deploy > New version` : 'ตรวจสอบรุ่น Apps Script ไม่สำเร็จ กรุณาตรวจสอบ URL และ deployment');
+        const health = await request('getHealth'); modernAPI = health.version === '2.2' && health.authMode === 'none';
+        if (!modernAPI) throw new Error(health.version ? `Apps Script รุ่น ${health.version} ยังไม่รองรับหน้าเว็บนี้ กรุณาใช้ Code.gs รุ่น 2.2 และ Deploy > New version` : 'ตรวจสอบรุ่น Apps Script ไม่สำเร็จ กรุณาตรวจสอบ URL และ deployment');
     } catch (error) {
         modernAPI = false; statusMessage(`ตรวจสอบการเชื่อมต่อไม่สำเร็จ: ${error.message} • กดโหลดข้อมูลใหม่เพื่อลองอีกครั้ง`, 'error');
     } finally { loading = false; renderAll(); }
@@ -70,7 +74,8 @@ async function loadData() {
         try {
             const result = await request('get' + key[0].toUpperCase() + key.slice(1), {}, true);
             if (!Array.isArray(result.data)) throw new Error('รูปแบบข้อมูลไม่ถูกต้อง');
-            state[key] = D.normalize(key, result.data); ready[key] = true;
+            state[key] = key === 'timeSlots' ? [...new Set(result.data.map(D.time).filter(Boolean))].sort() : D.normalize(key, result.data); ready[key] = true;
+            if (key === 'timeSlots' && state[key].length < 2) throw new Error('ไม่พบช่วงเวลาในคอลัมน์ TimeSlots ของชีต Lists');
         } catch (error) {
             errors[key] = error.message; state[key] = [];
             if (!modernAPI) break;
@@ -83,10 +88,13 @@ async function loadData() {
 }
 function scheduleStatus(s) { return !s.Date || !s.EndTime ? 'ตรวจสอบวันเวลา' : D.completed(s) ? 'ครบเวลานัดแล้ว' : 'ยังไม่ครบเวลานัด'; }
 function renderDashboard() {
-    $('dash-total-students').textContent = hasData('students') ? `${state.students.length} คน` : '—';
-    for (const [id, status] of [['dash-active-students', 'กำลังเรียน'], ['dash-trial-students', 'ทดลองเรียน']]) $(id).textContent = hasData('enrollments') ? `${new Set(state.enrollments.filter(e => e.EnrollmentStatus === status).map(e => e.StudentID)).size} คน` : '—';
+    const available = hasData('students', 'courses', 'enrollments', 'schedule'), stats = D.studentStats(state);
+    $('dash-total-students').textContent = available ? `${stats.total} คน` : '—';
+    $('dash-active-students').textContent = available ? `${stats.active} คน` : '—';
+    $('dash-trial-students').textContent = available ? `${stats.trials} คน` : '—';
+    $('dash-active-courses').innerHTML = available ? stats.activeByCourse.map(item => `<div class="course-count"><strong>${esc(item.course)}</strong><span>${item.count} คน</span></div>`).join('') || '<p class="subtext">ไม่มีนักเรียนที่กำลังเรียน</p>' : '<p class="subtext">รอข้อมูลนักเรียนและตารางเรียน</p>';
     $('dash-unpaid').textContent = hasData('enrollments') ? `${state.enrollments.filter(e => ['ยังไม่ชำระ', 'ชำระบางส่วน'].includes(e.PaymentStatus)).length} รายการ` : '—';
-    const sessions = state.schedule.filter(s => s.Date === D.today()).sort((a, b) => a.StartTime.localeCompare(b.StartTime));
+    const sessions = state.schedule.filter(s => s.Date === D.today() && D.validSchedule(s, state)).sort((a, b) => a.StartTime.localeCompare(b.StartTime));
     $('dash-today-classes').textContent = hasData('schedule') ? `${sessions.length} นัด` : '—';
     table('today-schedule-tbody', 4, sessions.map(s => { const e = state.enrollments.find(e => e.EnrollmentID === s.EnrollmentID); return `<tr><td>${esc(s.StartTime)}–${esc(s.EndTime)}</td><td>${esc(nameOf(e))}</td><td>${esc(e ? `${e.Course} / ${e.Level}` : 'ไม่พบหลักสูตร')}</td><td>${badge(scheduleStatus(s))}</td></tr>`; }).join(''), ['students', 'enrollments', 'schedule'], 'วันนี้ไม่มีนัดเรียน');
 }
@@ -96,25 +104,33 @@ function renderStudents() {
 }
 function renderEnrollments() {
     table('enrollments-tbody', 7, state.enrollments.map(e => {
-        const c = course(e), total = Number(c?.TotalHours || 0), p = D.progress(state.schedule.filter(s => s.EnrollmentID === e.EnrollmentID), total);
-        const progress = hasData('schedule') ? `${num(p.used)} / ${num(total)} ชม.<br><small>เหลือ ${num(p.remaining)} ชม. • ${p.percent}%</small>` : 'รอข้อมูลตารางเรียน';
+        const p = D.enrollmentProgress(e, state);
+        const progress = hasData('schedule') ? `${p.completed} / ${p.target} Session<br><small>เหลือ ${p.remaining} Session · เรียนแล้ว ${num(p.usedHours)} ชม.</small>` : 'รอข้อมูลตารางเรียน';
         return `<tr><td>${esc(nameOf(e))}<small class="subtext">${esc(dateText(e.EnrollDate))}</small></td><td>${esc(e.Course)}</td><td>${esc(e.Level)}</td><td>${badge(e.EnrollmentStatus)}</td><td>${badge(e.PaymentStatus)}</td><td>${progress}</td><td>${editButton('enrollment', e.EnrollmentID)}</td></tr>`;
     }).join(''), ['students', 'courses', 'enrollments']);
 }
 function renderCourses() { table('courses-tbody', 5, state.courses.map(c => `<tr><td>${esc(c.Course)}</td><td>${esc(c.Level)}</td><td>${num(c.TotalHours)} ชม.</td><td>${num(c.SessionCount)} ครั้ง</td><td>${badge(c.Active ? 'ใช้งาน' : 'ระงับ')}</td></tr>`).join(''), ['courses']); }
 function renderHolidays() { table('holidays-tbody', 5, [...state.holidays].sort((a, b) => a.Date.localeCompare(b.Date)).map(h => `<tr><td>${esc(dateText(h.Date))}</td><td>${esc(h.Reason)}</td><td>${esc(h.Type)}</td><td>${badge(h.Active ? 'ใช้งาน' : 'ระงับ')}</td><td>${editButton('holiday', h.Date)}</td></tr>`).join(''), ['holidays']); }
 function updateScheduleEnrollmentDropdown() {
-    const select = $('sch-select-enrollment'), previous = select.value, q = $('search-schedule').value.trim().toLowerCase();
-    select.replaceChildren(new Option('-- เลือกนักเรียนและหลักสูตร --', ''));
-    state.enrollments.filter(e => `${nameOf(e)} ${e.Course} ${e.Level}`.toLowerCase().includes(q)).forEach(e => select.add(new Option(`${nameOf(e)} — ${e.Course} / ${e.Level} (${e.EnrollmentStatus}, ลงทะเบียน ${dateText(e.EnrollDate)})`, e.EnrollmentID)));
+    const select = $('sch-select-student'), previous = select.value, q = $('search-schedule').value.trim().toLowerCase();
+    select.replaceChildren(new Option('-- เลือกนักเรียน --', ''));
+    D.studentGroups(state).filter(group => group.enrollments.length && D.studentName(group.student).toLowerCase().includes(q)).forEach(group => select.add(new Option(D.studentName(group.student), group.student.StudentID)));
     select.value = previous; if (select.selectedIndex < 0) select.value = '';
 }
 function renderScheduleView() {
-    const e = state.enrollments.find(e => e.EnrollmentID === $('sch-select-enrollment').value); $('sch-management-container').style.display = e ? 'block' : 'none'; if (!e) return;
-    const c = course(e), total = Number(c?.TotalHours || 0), sessions = state.schedule.filter(s => s.EnrollmentID === e.EnrollmentID).sort((a, b) => `${a.Date} ${a.StartTime}`.localeCompare(`${b.Date} ${b.StartTime}`)), p = D.progress(sessions, total);
-    $('sch-info-total').textContent = `${num(total)} ชม.`; $('sch-info-completed').textContent = hasData('schedule') ? `${num(p.used)} / ${num(total)} ชม.` : '—'; $('sch-info-remaining').textContent = hasData('schedule') ? `${num(p.remaining)} ชม.` : '—'; $('sch-info-session').textContent = hasData('schedule') ? `${sessions.length} / ${num(c?.SessionCount)} ครั้ง` : '—';
-    table('schedule-tbody', 7, sessions.map((s, i) => `<tr><td>ครั้งที่ ${i + 1}</td><td>${esc(dateText(s.Date))}</td><td>${esc(s.StartTime)}–${esc(s.EndTime)}</td><td>${num(s.Duration)} ชม.</td><td>${badge(scheduleStatus(s))}</td><td>${esc(s.Note)}</td><td>${editButton('schedule', s.ScheduleID)}</td></tr>`).join(''), ['schedule']); updateButtons();
+    const selected = student($('sch-select-student').value);
+    $('sch-management-container').style.display = selected ? 'block' : 'none'; if (!selected) return;
+    const enrollments = D.studentEnrollments(selected.StudentID, state);
+    $('sch-student-summary').innerHTML = `<strong>${esc(D.studentName(selected))}</strong><span>${enrollments.length} รายการลงทะเบียน</span>`;
+    if (!hasData('students', 'courses', 'enrollments', 'schedule')) { $('sch-enrollment-groups').innerHTML = '<p class="empty-state">รอข้อมูลตารางเรียน กรุณาโหลดข้อมูลให้ครบ</p>'; return; }
+    $('sch-enrollment-groups').innerHTML = enrollments.map(e => {
+        const p = D.enrollmentProgress(e, state);
+        const rows = p.sessions.map(s => `<tr><td>${sessionText(s)}</td><td>${esc(dateText(s.Date))}</td><td>${esc(s.StartTime)}–${esc(s.EndTime)}</td><td>${num(s.Duration)} ชม.</td><td>${badge(scheduleStatus(s))}</td><td>${esc(s.Note)}</td><td>${editButton('schedule', s.ScheduleID)}</td></tr>`).join('');
+        const finished = e.EnrollmentStatus === 'จบหลักสูตร';
+        return `<section class="student-enrollment-group"><div class="page-header"><div><h3>${esc(e.Course)} / ${esc(e.Level)}</h3><span class="subtext">ลงทะเบียน ${esc(dateText(e.EnrollDate))} · ${esc(e.PaymentStatus)}</span></div>${badge(e.EnrollmentStatus)}</div><div class="level-progress"><span>เรียนแล้ว ${p.completed} / ${p.target} Session</span><strong>${finished ? 'จบหลักสูตรแล้ว' : `เหลือ ${p.remaining} Session`}</strong><span>นัดแล้ว ${p.scheduled} ครั้ง · ยังไม่นัด ${p.unbooked} ครั้ง</span></div><div class="table-container"><table class="data-table"><thead><tr><th>Session</th><th>วันที่</th><th>เวลา</th><th>ระยะเวลา</th><th>สถานะ</th><th>หมายเหตุ</th><th>จัดการ</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty-state">ยังไม่มีนัดเรียน</td></tr>'}</tbody></table></div>${!finished && e.EnrollmentStatus !== 'ยกเลิก' && p.unbooked > 0 ? `<button type="button" class="btn btn-primary" data-write data-add-schedule="${esc(e.EnrollmentID)}">เพิ่มนัดเรียน ${esc(e.Level)}</button>` : ''}</section>`;
+    }).join(''); updateButtons();
 }
+function sessionText(s) { const n = D.sessionNumber(s); return n ? `Session ${n}` : 'ยังไม่ระบุ Session'; }
 function changeCalendarMonth(delta) {
     const [year, month] = calendarMonth.split('-').map(Number);
     calendarMonth = new Date(Date.UTC(year, month - 1 + delta, 1)).toISOString().slice(0, 7);
@@ -136,16 +152,15 @@ function renderCalendar() {
     $('calendar-month').textContent = new Intl.DateTimeFormat('th-TH', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, 1)));
     const keys = ['students', 'courses', 'enrollments', 'schedule', 'holidays'];
     const available = hasData(...keys), today = D.today();
-    const sessions = available ? [...state.schedule].sort((a, b) => `${a.StartTime}${a.ScheduleID}`.localeCompare(`${b.StartTime}${b.ScheduleID}`)) : [];
-    const invalid = sessions.filter(s => !s.Date).length;
-    $('calendar-message').textContent = loading ? 'กำลังโหลดตารางเรียน…' : !available ? 'ยังโหลดตารางเรียนไม่ครบ กรุณากดโหลดข้อมูลใหม่' : invalid ? `มี ${invalid} นัดที่วันที่ไม่ถูกต้อง กรุณาตรวจสอบในรายการนัดเรียนด้านล่าง` : 'เลือกวันที่เพื่อดูรายการนัดเรียนทั้งหมด';
+    const sessions = available ? state.schedule.filter(s => D.validSchedule(s, state)).sort((a, b) => `${a.StartTime}${a.ScheduleID}`.localeCompare(`${b.StartTime}${b.ScheduleID}`)) : [];
+    $('calendar-message').textContent = loading ? 'กำลังโหลดตารางเรียน…' : !available ? 'ยังโหลดตารางเรียนไม่ครบ กรุณากดโหลดข้อมูลใหม่' : 'เลือกวันที่เพื่อดูรายการนัดเรียนทั้งหมด';
     $('calendar-days').innerHTML = D.calendarDays(calendarMonth).map(date => {
         const own = sessions.filter(s => s.Date === date);
         const holidays = available ? state.holidays.filter(h => h.Active && h.Date === date) : [];
         const limit = holidays.length ? 2 : 3;
         const events = own.slice(0, limit).map(s => {
             const info = calendarEvent(s);
-            return `<span class="calendar-event" style="--event-color:${info.color};--event-bg:${info.color}12"><b>${esc(info.name)}</b><span>${esc(s.StartTime)}–${esc(s.EndTime)}</span><span class="calendar-course">${esc(info.course)}</span></span>`;
+            return `<span class="calendar-event" style="--event-color:${info.color};--event-bg:${info.color}12"><b>${esc(info.name)}</b><span class="calendar-session">${sessionText(s)}</span><span>${esc(s.StartTime)}–${esc(s.EndTime)}</span><span class="calendar-course">${esc(info.course)}</span></span>`;
         }).join('');
         return `<button type="button" class="calendar-day${date.slice(0, 7) !== calendarMonth ? ' outside' : ''}${date === today ? ' today' : ''}${holidays.length ? ' holiday' : ''}" data-calendar-date="${date}" ${date === today ? 'aria-current="date"' : ''} aria-label="${esc(calendarDateLabel(date))}${available ? `, ${own.length} นัดเรียน` : ', รอข้อมูล'}${holidays.length ? ', วันหยุด' : ''}"><span class="calendar-day-number">${Number(date.slice(-2))}</span>${holidays.map(h => `<span class="calendar-holiday">${esc(h.Reason)}</span>`).join('')}${events}${own.length > limit ? `<span class="calendar-more">+${own.length - limit} รายการ</span>` : ''}</button>`;
     }).join('');
@@ -157,10 +172,10 @@ function renderCalendarDay() {
         $('calendar-day-list').innerHTML = '<p class="empty-state">ยังโหลดข้อมูลไม่ครบ กรุณาโหลดข้อมูลใหม่</p>'; return;
     }
     const holidays = state.holidays.filter(h => h.Active && h.Date === selectedCalendarDate);
-    const sessions = state.schedule.filter(s => s.Date === selectedCalendarDate).sort((a, b) => a.StartTime.localeCompare(b.StartTime));
+    const sessions = state.schedule.filter(s => s.Date === selectedCalendarDate && D.validSchedule(s, state)).sort((a, b) => a.StartTime.localeCompare(b.StartTime));
     $('calendar-day-list').innerHTML = holidays.map(h => `<p class="calendar-holiday-detail">วันหยุด: ${esc(h.Reason)}</p>`).join('') + (sessions.length ? sessions.map(s => {
         const info = calendarEvent(s);
-        return `<article class="calendar-detail" style="--event-color:${info.color}"><strong>${esc(s.StartTime)}–${esc(s.EndTime)} · ${esc(info.name)}</strong><p>${esc(info.course)}</p>${s.Note ? `<p class="subtext">${esc(s.Note)}</p>` : ''}<button type="button" data-write data-calendar-edit="${esc(s.ScheduleID)}" class="btn btn-primary btn-sm" ${canWrite() ? '' : 'disabled'}>แก้ไขนัดเรียน</button></article>`;
+        return `<article class="calendar-detail" style="--event-color:${info.color}"><strong>${esc(s.StartTime)}–${esc(s.EndTime)} · ${esc(info.name)}</strong><p>${esc(info.course)} · ${sessionText(s)}</p>${s.Note ? `<p class="subtext">${esc(s.Note)}</p>` : ''}<button type="button" data-write data-calendar-edit="${esc(s.ScheduleID)}" class="btn btn-primary btn-sm" ${canWrite() ? '' : 'disabled'}>แก้ไขเวลาเรียน</button></article>`;
     }).join('') : '<p class="empty-state">ไม่มีนัดเรียนในวันนี้</p>');
 }
 function openCalendarDay(date) { selectedCalendarDate = date; renderCalendarDay(); openModal('calendar-day-modal'); }
@@ -168,7 +183,9 @@ function editCalendarSchedule(id) {
     if (!canWrite()) return;
     const session = state.schedule.find(s => s.ScheduleID === id); if (!session) return;
     $('search-schedule').value = ''; updateScheduleEnrollmentDropdown();
-    $('sch-select-enrollment').value = session.EnrollmentID; renderScheduleView();
+    const enrollment = state.enrollments.find(e => e.EnrollmentID === session.EnrollmentID);
+    const group = D.studentGroups(state).find(g => g.studentIds.includes(enrollment?.StudentID));
+    $('sch-select-student').value = group?.student.StudentID || ''; renderScheduleView();
     closeModal('calendar-day-modal'); openScheduleModal('edit', id);
 }
 function renderAll() { renderStudents(); renderCourses(); renderEnrollments(); renderHolidays(); updateScheduleEnrollmentDropdown(); renderScheduleView(); renderDashboard(); renderCalendar(); updateButtons(); }
@@ -183,19 +200,62 @@ function openStudentModal(mode, id) {
 function openEnrollmentModal(mode, id) {
     if (!canWrite()) return; const e = mode === 'edit' ? state.enrollments.find(e => e.EnrollmentID === id) : {}; if (!e) return;
     $('enr-mode').value = mode; $('enr-id').value = e.EnrollmentID || 'สร้างอัตโนมัติ';
+    enrollmentRequestId = mode === 'add' ? crypto.randomUUID() : '';
+    $('enr-sessions').replaceChildren(); $('enr-sessions-section').hidden = mode === 'edit';
+    $('enr-session-count').disabled = mode === 'edit';
     $('enr-student').replaceChildren(...state.students.filter(s => s.Active || s.StudentID === e.StudentID).map(s => new Option(D.studentName(s), s.StudentID)));
     $('enr-course').replaceChildren(...[...new Set(state.courses.filter(c => c.Active || c.Course === e.Course).map(c => c.Course))].map(c => new Option(c, c)));
     if (e.StudentID) $('enr-student').value = e.StudentID; if (e.Course) $('enr-course').value = e.Course; updateLevelDropdown(e.Level);
-    $('enr-status').value = e.EnrollmentStatus || 'กำลังเรียน'; $('enr-payment').value = e.PaymentStatus || 'ยังไม่ชำระ'; $('enr-note').value = e.Note || ''; openModal('enrollment-modal');
+    if (mode === 'edit') $('enr-session-count').value = String(Math.min(15, D.sessionTarget(e, state.courses)) || 1);
+    $('enr-status').value = e.EnrollmentStatus || 'กำลังเรียน'; $('enr-payment').value = e.PaymentStatus || 'ยังไม่ชำระ';
+    configureNote('enr-note', e, state.enrollments, mode); openModal('enrollment-modal');
 }
-function updateLevelDropdown(selected) { $('enr-level').replaceChildren(...state.courses.filter(c => c.Course === $('enr-course').value && (c.Active || c.Level === selected)).map(c => new Option(c.Level, c.Level))); if (selected) $('enr-level').value = selected; }
+function configureNote(id, item, rows, mode) {
+    const readOnly = mode === 'edit' ? item.readOnlyFields?.includes('Note') : rows.some(row => row.readOnlyFields?.includes('Note'));
+    $(id).value = item.Note || ''; $(id).readOnly = !!readOnly;
+    $(id).placeholder = readOnly ? 'อัปเดตอัตโนมัติจากชีต' : '';
+    $(id).title = readOnly ? 'ช่องนี้อัปเดตอัตโนมัติจากข้อมูลนักเรียนในชีต' : '';
+}
+function updateLevelDropdown(selected) {
+    $('enr-level').replaceChildren(...state.courses.filter(c => c.Course === $('enr-course').value && (c.Active || c.Level === selected)).map(c => new Option(c.Level, c.Level)));
+    if (selected) $('enr-level').value = selected;
+    updateEnrollmentSessionDefaults();
+}
+function updateEnrollmentSessionDefaults() {
+    if ($('enr-mode').value === 'edit') return;
+    const selected = course({ Course: $('enr-course').value, Level: $('enr-level').value });
+    $('enr-session-count').value = String(Math.max(1, Math.min(15, Number(selected?.SessionCount) || 1)));
+    renderEnrollmentSessions();
+}
+function readEnrollmentSessions() {
+    return [...$('enr-sessions').querySelectorAll('.enrollment-session-row')].map(row => ({
+        Date: row.querySelector('[data-session-date]').value,
+        StartTime: row.querySelector('[data-session-start]').value,
+        EndTime: row.querySelector('[data-session-end]').value
+    }));
+}
+function timeOptions(selected = '') {
+    return '<option value="">เลือกเวลา</option>' + state.timeSlots.map(time => `<option value="${time}"${time === selected ? ' selected' : ''}>${time}</option>`).join('');
+}
+function renderEnrollmentSessions() {
+    const previous = readEnrollmentSessions(), count = Number($('enr-session-count').value);
+    $('enr-sessions-hint').textContent = 'เลือกวันและเวลาให้ครบทุก Session · ช่วงเวลาอ้างอิงจากชีต · กลุ่มเดียวกันไม่เกิน 3 คน';
+    $('enr-sessions').innerHTML = Array.from({ length: Math.max(1, Math.min(15, count || 1)) }, (_, index) => {
+        const old = previous[index] || {}, n = index + 1;
+        return `<div class="enrollment-session-row"><strong class="session-label">Session ${n}</strong><div class="form-group"><label for="enr-date-${n}">วันที่</label><input id="enr-date-${n}" class="input-form" type="date" data-session-date value="${esc(old.Date || '')}" required></div><div class="form-group"><label for="enr-start-${n}">เวลาเริ่ม</label><select id="enr-start-${n}" class="input-form" data-session-start required>${timeOptions(old.StartTime)}</select></div><div class="form-group"><label for="enr-end-${n}">เวลาจบ</label><select id="enr-end-${n}" class="input-form" data-session-end required>${timeOptions(old.EndTime)}</select></div></div>`;
+    }).join('');
+}
 function openHolidayModal(mode, date) {
     if (!canWrite()) return; const h = mode === 'edit' ? state.holidays.find(h => h.Date === date) : {}; if (!h) return;
     $('hol-mode').value = mode; $('hol-date').value = h.Date || ''; $('hol-date').disabled = mode === 'edit'; $('hol-reason').value = h.Reason || ''; $('hol-type').value = h.Type || 'งดสอนพิเศษ'; $('hol-active').value = String(h.Active ?? true); openModal('holiday-modal');
 }
-function openScheduleModal(mode, id) {
-    if (!canWrite() || !$('sch-select-enrollment').value) return; const s = mode === 'edit' ? state.schedule.find(s => s.ScheduleID === id) : {}; if (!s) return;
-    $('sch-mode').value = mode; $('sch-id').value = s.ScheduleID || ''; $('sch-date').value = s.Date || ''; $('sch-start').value = s.StartTime || ''; $('sch-end').value = s.EndTime || ''; $('sch-note').value = s.Note || ''; calcDuration(); openModal('schedule-modal');
+function openScheduleModal(mode, id, enrollmentId) {
+    if (!canWrite()) return; const s = mode === 'edit' ? state.schedule.find(s => s.ScheduleID === id) : {}; if (!s) return;
+    const e = state.enrollments.find(e => e.EnrollmentID === (s.EnrollmentID || enrollmentId)); if (!e) return;
+    $('sch-enrollment-id').value = e.EnrollmentID;
+    $('sch-modal-title').textContent = `${nameOf(e)} · ${e.Course} / ${e.Level}${mode === 'edit' ? ` · ${sessionText(s)}` : ''}`;
+    $('sch-start').innerHTML = timeOptions(s.StartTime); $('sch-end').innerHTML = timeOptions(s.EndTime);
+    $('sch-mode').value = mode; $('sch-id').value = s.ScheduleID || ''; $('sch-date').value = s.Date || ''; configureNote('sch-note', s, state.schedule, mode); calcDuration(); openModal('schedule-modal');
 }
 function calcDuration() { const d = D.duration($('sch-start').value, $('sch-end').value); $('sch-duration').value = Number.isFinite(d) ? num(d) : ''; }
 async function save(action, payload, key, modal, loadingId) {
@@ -209,9 +269,28 @@ function submitStudent() {
     const p = { StudentID: $('stu-id').value || null, StudentName: $('stu-name').value.trim(), Nickname: $('stu-nickname').value.trim(), ParentName: $('stu-parent').value.trim(), Phone: $('stu-phone').value.trim(), Active: $('stu-active').value === 'true', Note: $('stu-note').value.trim() };
     if (!p.StudentName) return alert('กรุณากรอกชื่อ-นามสกุล'); return save('saveStudent', p, 'students', 'student-modal', 'stu-loading');
 }
-function submitEnrollment() {
+async function submitEnrollment() {
+    if (!canWrite()) return;
     const p = { EnrollmentID: $('enr-mode').value === 'edit' ? $('enr-id').value : null, StudentID: $('enr-student').value, Course: $('enr-course').value, Level: $('enr-level').value, EnrollmentStatus: $('enr-status').value, PaymentStatus: $('enr-payment').value, Note: $('enr-note').value.trim() };
-    if (!p.StudentID || !p.Course || !p.Level) return alert('กรุณาเลือกนักเรียน หลักสูตร และระดับให้ครบ'); return save('saveEnrollment', p, 'enrollments', 'enrollment-modal', 'enr-loading');
+    if (!p.StudentID || !p.Course || !p.Level) return alert('กรุณาเลือกนักเรียน หลักสูตร และระดับให้ครบ');
+    if (p.EnrollmentID) return save('saveEnrollment', p, 'enrollments', 'enrollment-modal', 'enr-loading');
+    p.SessionCount = Number($('enr-session-count').value); p.Sessions = readEnrollmentSessions(); p.requestId = enrollmentRequestId;
+    if (p.SessionCount < 1 || p.SessionCount > 15 || p.Sessions.length !== p.SessionCount) return alert('กรุณาเลือกจำนวน Session ตั้งแต่ 1–15');
+    const invalid = p.Sessions.findIndex(s => !D.date(s.Date) || !s.StartTime || !s.EndTime || D.duration(s.StartTime, s.EndTime) <= 0);
+    if (invalid >= 0) return alert(`กรุณาตรวจวันและเวลาของ Session ${invalid + 1} ให้ครบ เวลาจบต้องมากกว่าเวลาเริ่ม`);
+    busy = true; updateButtons(); $('enr-loading').style.display = 'inline-block';
+    try {
+        for (let attempt = 0; attempt < 5; attempt++) {
+            const r = await request('saveEnrollment', p, true);
+            if (r.code === 'CONFLICT') { if (!await confirmRoom(r.conflicts)) return; p.conflictVersion = r.conflictVersion; continue; }
+            if (r.code === 'HOLIDAY') { if (!confirm(`มี Session ตรงกับวันหยุด: ${r.reason}\nยืนยันนัดเรียนในวันหยุดนี้หรือไม่?`)) return; p.holidayVersion = r.holidayVersion; continue; }
+            if (!Array.isArray(r.data) || !Array.isArray(r.schedule)) throw new Error('ยังยืนยันผลบันทึกไม่ได้ กรุณาโหลดข้อมูลใหม่ก่อนบันทึกซ้ำ');
+            state.enrollments = D.normalize('enrollments', r.data); state.schedule = D.normalize('schedule', r.schedule);
+            ready.enrollments = ready.schedule = true; delete errors.enrollments; delete errors.schedule;
+            busy = false; closeModal('enrollment-modal'); renderAll(); statusMessage(`ลงทะเบียนและบันทึก ${p.SessionCount} Session เรียบร้อยแล้ว`, 'success'); return;
+        }
+        throw new Error('ตารางมีการเปลี่ยนแปลงหลายครั้ง กรุณาโหลดข้อมูลใหม่');
+    } catch (error) { alert(error.message); } finally { busy = false; $('enr-loading').style.display = 'none'; updateButtons(); }
 }
 function submitHoliday() {
     const p = { Date: $('hol-date').value, Reason: $('hol-reason').value.trim(), Type: $('hol-type').value, Active: $('hol-active').value === 'true' };
@@ -219,13 +298,13 @@ function submitHoliday() {
 }
 let resolveConflict = null;
 function confirmRoom(conflicts) {
-    $('conflict-list').replaceChildren(...conflicts.map(c => { const li = document.createElement('li'); li.textContent = `${c.StudentName} — ${c.Course} / ${c.Level} — ${c.StartTime}–${c.EndTime}`; return li; }));
+    $('conflict-list').replaceChildren(...conflicts.map(c => { const li = document.createElement('li'); li.textContent = `${c.Date ? `${dateText(c.Date)} · ` : ''}${c.StudentName} — ${c.Course} / ${c.Level} — ${c.StartTime}–${c.EndTime}`; return li; }));
     openModal('conflict-modal'); return new Promise(resolve => { resolveConflict = resolve; });
 }
 function finishConflict(confirmed) { $('conflict-modal').classList.remove('show'); if (resolveConflict) resolveConflict(confirmed); resolveConflict = null; }
 async function submitSchedule() {
     if (!canWrite()) return;
-    const p = { ScheduleID: $('sch-id').value || null, EnrollmentID: $('sch-select-enrollment').value, Date: $('sch-date').value, StartTime: $('sch-start').value, EndTime: $('sch-end').value, Note: $('sch-note').value.trim() };
+    const p = { ScheduleID: $('sch-id').value || null, EnrollmentID: $('sch-enrollment-id').value, Date: $('sch-date').value, StartTime: $('sch-start').value, EndTime: $('sch-end').value, Note: $('sch-note').value.trim() };
     if (!p.EnrollmentID || !p.Date || !p.StartTime || !p.EndTime) return alert('กรุณาเลือกนักเรียน วันและเวลาให้ครบ'); if (D.duration(p.StartTime, p.EndTime) <= 0) return alert('เวลาจบต้องมากกว่าเวลาเริ่ม');
     busy = true; updateButtons(); $('sch-loading').style.display = 'inline-block';
     try {
@@ -250,6 +329,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('calendar-today').addEventListener('click', () => { calendarMonth = D.today().slice(0, 7); renderCalendar(); });
     $('calendar-days').addEventListener('click', event => { const day = event.target.closest('[data-calendar-date]'); if (day) openCalendarDay(day.dataset.calendarDate); });
     $('calendar-day-list').addEventListener('click', event => { const button = event.target.closest('[data-calendar-edit]'); if (button) editCalendarSchedule(button.dataset.calendarEdit); });
+    $('sch-enrollment-groups').addEventListener('click', event => { const button = event.target.closest('[data-add-schedule]'); if (button) openScheduleModal('add', null, button.dataset.addSchedule); });
     $('confirm-room').addEventListener('click', () => finishConflict(true)); $('cancel-room').addEventListener('click', () => finishConflict(false));
     document.addEventListener('click', event => { const b = event.target.closest('[data-edit]'); if (b) ({ student: openStudentModal, enrollment: openEnrollmentModal, schedule: openScheduleModal, holiday: openHolidayModal })[b.dataset.edit]('edit', b.dataset.id); if (event.target.classList.contains('modal') && event.target.id !== 'conflict-modal') closeModal(event.target.id); });
     document.addEventListener('keydown', event => {
