@@ -1,6 +1,5 @@
-// BostonRobotics AdminSystem API v2.0
-// Set ADMIN_PASSWORD (12+ characters) in Project Settings > Script properties.
-// Never place the password or session tokens in GitHub or in the spreadsheet.
+// BostonRobotics AdminSystem API v2.1 — no application login.
+// Anyone with access to this deployment can read and edit the data.
 const SPREADSHEET_ID = '1oCEEfP_Yf4p6e1UmY1K1sPKs-vZe3xNpAYw9W3gQFSI';
 const TIME_ZONE = 'Asia/Bangkok';
 const SCHEMA = {
@@ -11,20 +10,14 @@ const SCHEMA = {
   Holidays: ['Date', 'Reason', 'Type', 'Active']
 };
 function json_(value) { return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON); }
-function health_() { return { success: true, version: '2.0', configured: String(PropertiesService.getScriptProperties().getProperty('ADMIN_PASSWORD') || '').length >= 12 }; }
+function health_() { return { success: true, version: '2.1', authMode: 'none' }; }
 function doGet(e) {
   if (e && e.parameter && e.parameter.action === 'getHealth') return json_(health_());
-  return json_({ success: false, code: 'UNAUTHORIZED', message: 'กรุณาเข้าสู่ระบบผู้ดูแล' });
+  return json_({ success: false, code: 'METHOD_NOT_ALLOWED', message: 'กรุณาเรียกข้อมูลด้วย POST' });
 }
 function doPost(e) {
   try {
     const request = JSON.parse(e.postData.contents || '{}');
-    if (request.action === 'login') return json_(login_(request.payload || {}));
-    if (!authorized_(request.token)) return json_({ success: false, code: 'UNAUTHORIZED', message: 'กรุณาเข้าสู่ระบบอีกครั้ง' });
-    if (request.action === 'logout') {
-      CacheService.getScriptCache().remove('session:' + hash_(request.token));
-      return json_({ success: true });
-    }
     const reads = { getStudents: 'Students', getCourses: 'Courses', getEnrollments: 'Enrollments', getSchedule: 'Schedule', getHolidays: 'Holidays' };
     if (Object.prototype.hasOwnProperty.call(reads, request.action)) return json_(result_(reads[request.action]));
     const writes = { saveStudent: saveStudent_, saveEnrollment: saveEnrollment_, saveSchedule: saveSchedule_, saveHoliday: saveHoliday_ };
@@ -40,33 +33,6 @@ function locked_(callback) {
   try { return callback(); } finally { lock.releaseLock(); }
 }
 function hash_(value) { return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(value), Utilities.Charset.UTF_8)); }
-function equal_(a, b) {
-  const x = hash_(a), y = hash_(b); let mismatch = 0;
-  for (let i = 0; i < x.length; i++) mismatch |= x.charCodeAt(i) ^ y.charCodeAt(i);
-  return mismatch === 0;
-}
-function login_(payload) {
-  return locked_(function () {
-    const props = PropertiesService.getScriptProperties(), secret = props.getProperty('ADMIN_PASSWORD');
-    if (!secret || secret.length < 12) throw new Error('กรุณาตั้งค่า ADMIN_PASSWORD อย่างน้อย 12 ตัวอักษรใน Apps Script');
-    const now = Date.now(); let attempts = JSON.parse(props.getProperty('LOGIN_ATTEMPTS') || '{}');
-    if (!attempts.until || attempts.until < now) attempts = { count: 0, until: now + 60000 };
-    if (attempts.count >= 5) throw new Error('เข้าสู่ระบบผิดหลายครั้ง กรุณารอ 1 นาที');
-    if (!equal_(String(payload.password || ''), secret)) {
-      attempts.count++; props.setProperty('LOGIN_ATTEMPTS', JSON.stringify(attempts));
-      throw new Error('รหัสผ่านไม่ถูกต้อง');
-    }
-    props.deleteProperty('LOGIN_ATTEMPTS');
-    const token = Utilities.getUuid() + Utilities.getUuid();
-    CacheService.getScriptCache().put('session:' + hash_(token), hash_(secret), 21600);
-    return { success: true, token: token, expiresIn: 21600 };
-  });
-}
-function authorized_(token) {
-  if (typeof token !== 'string' || token.length > 200 || !token) return false;
-  const secret = PropertiesService.getScriptProperties().getProperty('ADMIN_PASSWORD');
-  return !!secret && secret.length >= 12 && CacheService.getScriptCache().get('session:' + hash_(token)) === hash_(secret);
-}
 function sheet_(name) {
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(name);
   if (!sheet) throw new Error('ไม่พบชีต ' + name + ' กรุณาตรวจชื่อแท็บ');

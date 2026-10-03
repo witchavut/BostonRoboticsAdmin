@@ -2,9 +2,8 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbyE4ZEXNnTrqec6xnBRgabR3B28DZ3hbnxIrrzngv-547-eCRPthMg1Gy2BHhOHtaQ1ng/exec';
 const D = BostonDomain, state = { students: [], courses: [], enrollments: [], schedule: [], holidays: [] };
 const labels = { students: 'นักเรียน', courses: 'หลักสูตร', enrollments: 'ลงทะเบียนเรียน', schedule: 'ตารางเรียน', holidays: 'วันหยุด' };
-let ready = {}, errors = {}, token = '', modernAPI = false, busy = false, loading = false;
-let sessionGeneration = 0;
-const activeRequests = new Set();
+let ready = {}, errors = {}, modernAPI = false, busy = false, loading = false;
+let calendarMonth = D.today().slice(0, 7), selectedCalendarDate = '';
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = value => Number(value || 0).toLocaleString('th-TH', { maximumFractionDigits: 2 });
@@ -13,7 +12,7 @@ const course = e => state.courses.find(c => c.Course === e.Course && c.Level ===
 const nameOf = e => D.studentName(student(e?.StudentID));
 const dateText = d => d ? d.split('-').reverse().join('/') : 'ตรวจสอบวันที่';
 const hasData = (...keys) => keys.every(k => ready[k] && !errors[k]);
-const canWrite = () => modernAPI && !!token && !busy && !loading && hasData(...Object.keys(labels));
+const canWrite = () => modernAPI && !busy && !loading && hasData(...Object.keys(labels));
 function badge(text) {
     const color = ['ใช้งาน', 'ชำระแล้ว', 'กำลังเรียน', 'ครบเวลานัดแล้ว'].includes(text) ? 'success' : ['ระงับ', 'ยกเลิก'].includes(text) ? 'danger' : 'secondary';
     return `<span class="badge badge-${color}">${esc(text)}</span>`;
@@ -21,31 +20,27 @@ function badge(text) {
 function editButton(kind, id) { return `<button class="btn btn-primary btn-sm" data-edit="${kind}" data-id="${esc(id)}">แก้ไข</button>`; }
 function table(id, cols, rows, keys, empty = 'ยังไม่มีข้อมูล') {
     const failed = keys.filter(k => errors[k]);
-    const message = failed.length ? `โหลด${failed.map(k => labels[k]).join(' / ')}ไม่สำเร็จ กรุณาโหลดข้อมูลใหม่` : keys.some(k => !ready[k]) ? loading ? 'กำลังโหลดข้อมูล…' : 'เข้าสู่ระบบเพื่อดูข้อมูล' : '';
+    const message = failed.length ? `โหลด${failed.map(k => labels[k]).join(' / ')}ไม่สำเร็จ กรุณาโหลดข้อมูลใหม่` : keys.some(k => !ready[k]) ? loading ? 'กำลังโหลดข้อมูล…' : 'รอการเชื่อมต่อข้อมูล' : '';
     $(id).innerHTML = message || !rows ? `<tr><td colspan="${cols}" class="empty-state">${esc(message || empty)}</td></tr>` : rows;
 }
 function statusMessage(text, kind = 'info') { $('connection-status').textContent = text; $('connection-status').className = `connection-status ${kind}`; }
 function updateButtons() {
     document.querySelectorAll('[data-write], [data-edit]').forEach(b => b.disabled = !canWrite());
-    $('refresh-data').disabled = busy || loading; $('logout-button').disabled = busy;
+    $('refresh-data').disabled = busy || loading;
 }
 async function request(action, payload, post = false) {
-    const requestToken = token, generation = sessionGeneration;
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 45000);
-    activeRequests.add(controller);
     try {
         const options = { signal: controller.signal, cache: 'no-store', redirect: 'follow' };
-        if (post) Object.assign(options, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload, token: requestToken }) });
+        if (post) Object.assign(options, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload }) });
         const response = await fetch(post ? API_URL : `${API_URL}?action=${encodeURIComponent(action)}`, options);
         if (!response.ok) throw new Error(`ติดต่อระบบไม่สำเร็จ (${response.status})`);
         const raw = await response.text(); let result;
         try { result = JSON.parse(raw); } catch { throw new Error('ไม่ได้รับข้อมูล JSON จาก Apps Script กรุณาตรวจสอบ URL และสิทธิ์เข้าถึง deployment'); }
         if (!result || typeof result !== 'object') throw new Error('รูปแบบข้อมูลจาก Apps Script ไม่ถูกต้อง');
         if (result.code === 'UNAUTHORIZED') {
-            if (requestToken && generation === sessionGeneration && token === requestToken) {
-                logout(false); statusMessage('เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง', 'error');
-            }
-            throw new Error('กรุณาเข้าสู่ระบบอีกครั้ง');
+            modernAPI = false;
+            throw new Error('Apps Script ยังบังคับเข้าสู่ระบบ กรุณาแทน Code.gs ด้วยรุ่น 2.1 และ Deploy > New version');
         }
         if (!result.success && !['CONFLICT', 'HOLIDAY'].includes(result.code)) throw new Error(result.message || 'ระบบไม่สามารถทำรายการได้');
         return result;
@@ -53,54 +48,32 @@ async function request(action, payload, post = false) {
         if (action.startsWith('save') && (error.name === 'AbortError' || error instanceof TypeError)) throw new Error('ยังยืนยันผลบันทึกไม่ได้ กรุณาโหลดข้อมูลใหม่ก่อนบันทึกซ้ำ');
         if (error.name === 'AbortError') throw new Error('การเชื่อมต่อใช้เวลานานเกินไป กรุณาลองใหม่');
         throw error;
-    } finally { clearTimeout(timer); activeRequests.delete(controller); }
+    } finally { clearTimeout(timer); }
 }
 async function initApp() {
     if (loading || busy) return;
-    loading = true; updateButtons(); statusMessage('กำลังตรวจสอบการเชื่อมต่อ…');
-    modernAPI = false; $('login-panel').hidden = true;
+    loading = true; renderAll(); statusMessage('กำลังตรวจสอบการเชื่อมต่อ…');
+    modernAPI = false;
     try {
-        const health = await request('getHealth'); modernAPI = health.version === '2.0';
-        if (!modernAPI) throw new Error(health.version ? `Apps Script รุ่น ${health.version} ยังไม่รองรับ กรุณาใช้ Code.gs รุ่น 2.0 และ Deploy > New version` : 'ตรวจสอบรุ่น Apps Script ไม่สำเร็จ กรุณาตรวจสอบ URL และ deployment');
-        $('login-panel').hidden = false;
-        statusMessage(health.configured ? 'กรุณาเข้าสู่ระบบผู้ดูแล' : 'ต้องตั้งค่า ADMIN_PASSWORD ใน Apps Script ก่อนเข้าสู่ระบบ', health.configured ? 'info' : 'error');
+        const health = await request('getHealth'); modernAPI = health.version === '2.1' && health.authMode === 'none';
+        if (!modernAPI) throw new Error(health.version ? `Apps Script รุ่น ${health.version} ยังไม่รองรับหน้าเว็บนี้ กรุณาใช้ Code.gs รุ่น 2.1 และ Deploy > New version` : 'ตรวจสอบรุ่น Apps Script ไม่สำเร็จ กรุณาตรวจสอบ URL และ deployment');
     } catch (error) {
         modernAPI = false; statusMessage(`ตรวจสอบการเชื่อมต่อไม่สำเร็จ: ${error.message} • กดโหลดข้อมูลใหม่เพื่อลองอีกครั้ง`, 'error');
     } finally { loading = false; renderAll(); }
-}
-async function login(event) {
-    event.preventDefault(); if (loading || busy || !modernAPI) return;
-    loading = true; updateButtons(); $('login-button').disabled = true; $('login-error').textContent = '';
-    try {
-        const result = await request('login', { password: $('admin-password').value }, true);
-        if (typeof result.token !== 'string' || !result.token) throw new Error('ไม่ได้รับเซสชันเข้าสู่ระบบ กรุณาลองใหม่');
-        token = result.token; sessionGeneration++; $('admin-password').value = ''; $('login-panel').hidden = true; $('logout-button').hidden = false;
-        loading = false; await loadData();
-    } catch (error) { $('login-error').textContent = error.message; }
-    finally { loading = false; $('login-button').disabled = false; updateButtons(); }
-}
-function logout(send = true) {
-    if (busy && send) return;
-    sessionGeneration++; activeRequests.forEach(controller => controller.abort());
-    if (send && token) request('logout', {}, true).catch(() => {});
-    token = ''; loading = false; Object.keys(state).forEach(k => state[k] = []); ready = {}; errors = {};
-    document.querySelectorAll('.modal.show').forEach(m => m.classList.remove('show'));
-    $('login-panel').hidden = !modernAPI; $('logout-button').hidden = true; statusMessage('ออกจากระบบแล้ว'); renderAll();
+    if (modernAPI) await loadData();
 }
 async function loadData() {
-    if (loading || busy || !modernAPI || !token) return;
+    if (loading || busy || !modernAPI) return;
     loading = true; errors = {}; ready = {}; renderAll(); statusMessage('กำลังโหลดข้อมูล…');
-    const generation = sessionGeneration;
     // Avoid starting five Apps Script executions at once on a cold deployment.
     for (const key of Object.keys(state)) {
         try {
             const result = await request('get' + key[0].toUpperCase() + key.slice(1), {}, true);
-            if (generation !== sessionGeneration) return;
             if (!Array.isArray(result.data)) throw new Error('รูปแบบข้อมูลไม่ถูกต้อง');
             state[key] = D.normalize(key, result.data); ready[key] = true;
         } catch (error) {
-            if (generation !== sessionGeneration) return;
             errors[key] = error.message; state[key] = [];
+            if (!modernAPI) break;
         }
     }
     loading = false; const failed = Object.keys(errors);
@@ -142,7 +115,63 @@ function renderScheduleView() {
     $('sch-info-total').textContent = `${num(total)} ชม.`; $('sch-info-completed').textContent = hasData('schedule') ? `${num(p.used)} / ${num(total)} ชม.` : '—'; $('sch-info-remaining').textContent = hasData('schedule') ? `${num(p.remaining)} ชม.` : '—'; $('sch-info-session').textContent = hasData('schedule') ? `${sessions.length} / ${num(c?.SessionCount)} ครั้ง` : '—';
     table('schedule-tbody', 7, sessions.map((s, i) => `<tr><td>ครั้งที่ ${i + 1}</td><td>${esc(dateText(s.Date))}</td><td>${esc(s.StartTime)}–${esc(s.EndTime)}</td><td>${num(s.Duration)} ชม.</td><td>${badge(scheduleStatus(s))}</td><td>${esc(s.Note)}</td><td>${editButton('schedule', s.ScheduleID)}</td></tr>`).join(''), ['schedule']); updateButtons();
 }
-function renderAll() { renderStudents(); renderCourses(); renderEnrollments(); renderHolidays(); updateScheduleEnrollmentDropdown(); renderScheduleView(); renderDashboard(); updateButtons(); }
+function changeCalendarMonth(delta) {
+    const [year, month] = calendarMonth.split('-').map(Number);
+    calendarMonth = new Date(Date.UTC(year, month - 1 + delta, 1)).toISOString().slice(0, 7);
+    renderCalendar();
+}
+function calendarDateLabel(date) {
+    return new Intl.DateTimeFormat('th-TH', { dateStyle: 'full', timeZone: 'Asia/Bangkok' }).format(new Date(`${date}T12:00:00+07:00`));
+}
+function calendarEvent(s) {
+    const enrollment = state.enrollments.find(e => e.EnrollmentID === s.EnrollmentID);
+    const color = course(enrollment || {})?.ColorHex;
+    return {
+        name: nameOf(enrollment), course: enrollment ? `${enrollment.Course} / ${enrollment.Level}` : 'ไม่พบหลักสูตร',
+        color: /^#[0-9a-f]{6}$/i.test(color || '') ? color : '#2563eb'
+    };
+}
+function renderCalendar() {
+    const [year, month] = calendarMonth.split('-').map(Number);
+    $('calendar-month').textContent = new Intl.DateTimeFormat('th-TH', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, 1)));
+    const keys = ['students', 'courses', 'enrollments', 'schedule', 'holidays'];
+    const available = hasData(...keys), today = D.today();
+    const sessions = available ? [...state.schedule].sort((a, b) => `${a.StartTime}${a.ScheduleID}`.localeCompare(`${b.StartTime}${b.ScheduleID}`)) : [];
+    const invalid = sessions.filter(s => !s.Date).length;
+    $('calendar-message').textContent = loading ? 'กำลังโหลดตารางเรียน…' : !available ? 'ยังโหลดตารางเรียนไม่ครบ กรุณากดโหลดข้อมูลใหม่' : invalid ? `มี ${invalid} นัดที่วันที่ไม่ถูกต้อง กรุณาตรวจสอบในรายการนัดเรียนด้านล่าง` : 'เลือกวันที่เพื่อดูรายการนัดเรียนทั้งหมด';
+    $('calendar-days').innerHTML = D.calendarDays(calendarMonth).map(date => {
+        const own = sessions.filter(s => s.Date === date);
+        const holidays = available ? state.holidays.filter(h => h.Active && h.Date === date) : [];
+        const limit = holidays.length ? 2 : 3;
+        const events = own.slice(0, limit).map(s => {
+            const info = calendarEvent(s);
+            return `<span class="calendar-event" style="--event-color:${info.color};--event-bg:${info.color}12"><b>${esc(info.name)}</b><span>${esc(s.StartTime)}–${esc(s.EndTime)}</span><span class="calendar-course">${esc(info.course)}</span></span>`;
+        }).join('');
+        return `<button type="button" class="calendar-day${date.slice(0, 7) !== calendarMonth ? ' outside' : ''}${date === today ? ' today' : ''}${holidays.length ? ' holiday' : ''}" data-calendar-date="${date}" ${date === today ? 'aria-current="date"' : ''} aria-label="${esc(calendarDateLabel(date))}${available ? `, ${own.length} นัดเรียน` : ', รอข้อมูล'}${holidays.length ? ', วันหยุด' : ''}"><span class="calendar-day-number">${Number(date.slice(-2))}</span>${holidays.map(h => `<span class="calendar-holiday">${esc(h.Reason)}</span>`).join('')}${events}${own.length > limit ? `<span class="calendar-more">+${own.length - limit} รายการ</span>` : ''}</button>`;
+    }).join('');
+    if (selectedCalendarDate && $('calendar-day-modal').classList.contains('show')) renderCalendarDay();
+}
+function renderCalendarDay() {
+    $('calendar-day-title').textContent = calendarDateLabel(selectedCalendarDate);
+    if (!hasData('students', 'courses', 'enrollments', 'schedule', 'holidays')) {
+        $('calendar-day-list').innerHTML = '<p class="empty-state">ยังโหลดข้อมูลไม่ครบ กรุณาโหลดข้อมูลใหม่</p>'; return;
+    }
+    const holidays = state.holidays.filter(h => h.Active && h.Date === selectedCalendarDate);
+    const sessions = state.schedule.filter(s => s.Date === selectedCalendarDate).sort((a, b) => a.StartTime.localeCompare(b.StartTime));
+    $('calendar-day-list').innerHTML = holidays.map(h => `<p class="calendar-holiday-detail">วันหยุด: ${esc(h.Reason)}</p>`).join('') + (sessions.length ? sessions.map(s => {
+        const info = calendarEvent(s);
+        return `<article class="calendar-detail" style="--event-color:${info.color}"><strong>${esc(s.StartTime)}–${esc(s.EndTime)} · ${esc(info.name)}</strong><p>${esc(info.course)}</p>${s.Note ? `<p class="subtext">${esc(s.Note)}</p>` : ''}<button type="button" data-write data-calendar-edit="${esc(s.ScheduleID)}" class="btn btn-primary btn-sm" ${canWrite() ? '' : 'disabled'}>แก้ไขนัดเรียน</button></article>`;
+    }).join('') : '<p class="empty-state">ไม่มีนัดเรียนในวันนี้</p>');
+}
+function openCalendarDay(date) { selectedCalendarDate = date; renderCalendarDay(); openModal('calendar-day-modal'); }
+function editCalendarSchedule(id) {
+    if (!canWrite()) return;
+    const session = state.schedule.find(s => s.ScheduleID === id); if (!session) return;
+    $('search-schedule').value = ''; updateScheduleEnrollmentDropdown();
+    $('sch-select-enrollment').value = session.EnrollmentID; renderScheduleView();
+    closeModal('calendar-day-modal'); openScheduleModal('edit', id);
+}
+function renderAll() { renderStudents(); renderCourses(); renderEnrollments(); renderHolidays(); updateScheduleEnrollmentDropdown(); renderScheduleView(); renderDashboard(); renderCalendar(); updateButtons(); }
 function openModal(id) { $(id).classList.add('show'); $(id).querySelector('input:not([disabled]):not([type="hidden"]),select,button')?.focus(); }
 function closeModal(id) { if (!busy) $(id).classList.remove('show'); }
 function openStudentModal(mode, id) {
@@ -215,7 +244,12 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.nav-links a').forEach(link => link.addEventListener('click', e => { e.preventDefault(); document.querySelectorAll('.nav-links a, .page-section').forEach(el => el.classList.remove('active')); link.classList.add('active'); $(link.dataset.target).classList.add('active'); $('sidebar').classList.remove('open'); }));
     $('menu-toggle').addEventListener('click', () => $('sidebar').classList.toggle('open')); $('search-student').addEventListener('input', renderStudents);
     $('search-schedule').addEventListener('input', () => { updateScheduleEnrollmentDropdown(); renderScheduleView(); });
-    $('refresh-data').addEventListener('click', () => modernAPI ? loadData() : initApp()); $('login-form').addEventListener('submit', login); $('logout-button').addEventListener('click', () => logout());
+    $('refresh-data').addEventListener('click', () => modernAPI ? loadData() : initApp());
+    $('calendar-prev').addEventListener('click', () => changeCalendarMonth(-1));
+    $('calendar-next').addEventListener('click', () => changeCalendarMonth(1));
+    $('calendar-today').addEventListener('click', () => { calendarMonth = D.today().slice(0, 7); renderCalendar(); });
+    $('calendar-days').addEventListener('click', event => { const day = event.target.closest('[data-calendar-date]'); if (day) openCalendarDay(day.dataset.calendarDate); });
+    $('calendar-day-list').addEventListener('click', event => { const button = event.target.closest('[data-calendar-edit]'); if (button) editCalendarSchedule(button.dataset.calendarEdit); });
     $('confirm-room').addEventListener('click', () => finishConflict(true)); $('cancel-room').addEventListener('click', () => finishConflict(false));
     document.addEventListener('click', event => { const b = event.target.closest('[data-edit]'); if (b) ({ student: openStudentModal, enrollment: openEnrollmentModal, schedule: openScheduleModal, holiday: openHolidayModal })[b.dataset.edit]('edit', b.dataset.id); if (event.target.classList.contains('modal') && event.target.id !== 'conflict-modal') closeModal(event.target.id); });
     document.addEventListener('keydown', event => {
@@ -229,6 +263,6 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
         }
     });
-    setInterval(() => { if (!loading && Object.keys(ready).length) { renderDashboard(); renderEnrollments(); renderScheduleView(); updateButtons(); } }, 30000);
+    setInterval(() => { if (!loading && Object.keys(ready).length) { renderDashboard(); renderEnrollments(); renderScheduleView(); renderCalendar(); updateButtons(); } }, 30000);
     initApp();
 });

@@ -6,7 +6,7 @@
     <title>BostonRobotics AdminSystem</title>
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="css/style.css?v=2.0.0">
+    <link rel="stylesheet" href="css/style.css?v=2.1.0">
 </head>
 <body>
     <div class="mobile-header">
@@ -20,24 +20,20 @@
             <p>Admin System</p>
         </div>
         <ul class="nav-links">
-            <li><a href="#" data-target="dashboard" class="active"><i class="fas fa-home"></i> Dashboard</a></li>
+            <li><a href="#" data-target="schedule" class="active"><i class="fas fa-calendar-alt"></i> ตารางเรียน</a></li>
+            <li><a href="#" data-target="dashboard"><i class="fas fa-home"></i> Dashboard</a></li>
             <li><a href="#" data-target="students"><i class="fas fa-user-graduate"></i> นักเรียน</a></li>
             <li><a href="#" data-target="enrollments"><i class="fas fa-book-open"></i> ลงทะเบียนเรียน</a></li>
-            <li><a href="#" data-target="schedule"><i class="fas fa-calendar-alt"></i> ตารางเรียน</a></li>
             <li><a href="#" data-target="courses"><i class="fas fa-robot"></i> หลักสูตร</a></li>
             <li><a href="#" data-target="holidays"><i class="fas fa-umbrella-beach"></i> วันหยุด</a></li>
         </ul>
     </aside>
 
     <main class="main-content">
-        <div class="app-toolbar"><strong>BostonRobotics AdminSystem</strong><div><button id="refresh-data" class="btn btn-secondary">โหลดข้อมูลใหม่</button> <button id="logout-button" class="btn btn-secondary" hidden>ออกจากระบบ</button></div></div>
+        <div class="app-toolbar"><strong>BostonRobotics AdminSystem</strong><button id="refresh-data" class="btn btn-secondary">โหลดข้อมูลใหม่</button></div>
         <div id="connection-status" class="connection-status" role="status" aria-live="polite">กำลังเชื่อมต่อ…</div>
-        <section id="login-panel" class="login-panel" hidden>
-            <h2>เข้าสู่ระบบผู้ดูแล</h2><p>บัญชีสำหรับเจ้าของ BostonRobotics</p>
-            <form id="login-form"><label for="admin-password">รหัสผ่าน</label><input id="admin-password" class="input-form" type="password" autocomplete="current-password" required><p id="login-error" role="alert"></p><button id="login-button" class="btn btn-primary" type="submit">เข้าสู่ระบบ</button></form>
-        </section>
         <!-- Dashboard -->
-        <section id="dashboard" class="page-section active">
+        <section id="dashboard" class="page-section">
             <h1 class="page-title">ภาพรวมระบบ (Dashboard)</h1>
             <div class="dashboard-cards">
                 <div class="card card-blue"><h3>นักเรียนทั้งหมด</h3><p id="dash-total-students">0 คน</p></div>
@@ -85,8 +81,22 @@
         </section>
 
         <!-- Schedule (Management UI) -->
-        <section id="schedule" class="page-section">
-            <div class="page-header"><h1 class="page-title">จัดการตารางเรียน</h1></div>
+        <section id="schedule" class="page-section active">
+            <div class="page-header"><h1 class="page-title">ตารางเรียน</h1></div>
+            <div class="calendar-card" aria-label="ปฏิทินตารางเรียน">
+                <div class="calendar-header">
+                    <h2 id="calendar-month" aria-live="polite"></h2>
+                    <div class="calendar-navigation">
+                        <button type="button" id="calendar-prev" class="btn calendar-arrow" aria-label="เดือนก่อนหน้า">&#10094;</button>
+                        <button type="button" id="calendar-today" class="btn btn-secondary">เดือนนี้</button>
+                        <button type="button" id="calendar-next" class="btn calendar-arrow" aria-label="เดือนถัดไป">&#10095;</button>
+                    </div>
+                </div>
+                <p id="calendar-message" class="calendar-message" role="status"></p>
+                <div class="calendar-week" aria-hidden="true"><span>จ.</span><span>อ.</span><span>พ.</span><span>พฤ.</span><span>ศ.</span><span class="saturday">ส.</span><span class="sunday">อา.</span></div>
+                <div id="calendar-days" class="calendar-days"></div>
+            </div>
+            <h2 class="section-title schedule-management-title">จัดการนัดเรียนรายนักเรียน</h2>
             
             <div class="form-group" style="max-width: 400px; margin-bottom: 25px;">
                 <label>เลือกนักเรียนและหลักสูตร</label>
@@ -143,6 +153,12 @@
     </main>
 
     <!-- Modals -->
+    <div id="calendar-day-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="calendar-day-title">
+        <div class="modal-content">
+            <div class="modal-header"><h2 id="calendar-day-title"></h2><button type="button" class="btn btn-secondary" aria-label="ปิดรายการนัดเรียน" onclick="closeModal('calendar-day-modal')">×</button></div>
+            <div id="calendar-day-list" class="modal-body"></div>
+        </div>
+    </div>
     <!-- Student Modal -->
     <div id="student-modal" class="modal"><div class="modal-content"><div class="modal-header"><h2 id="stu-modal-title">ข้อมูลนักเรียน</h2><span class="close" onclick="closeModal('student-modal')">&times;</span></div><div class="modal-body"><input type="hidden" id="stu-mode" value="add"><input type="hidden" id="stu-id"><div class="form-group"><label for="stu-name">ชื่อ-นามสกุล</label><input type="text" id="stu-name" class="input-form"></div><div class="form-group"><label for="stu-nickname">ชื่อเล่น</label><input type="text" id="stu-nickname" class="input-form"></div><div class="form-group"><label for="stu-note">หมายเหตุ</label><input id="stu-note" class="input-form" type="text"></div><div class="form-group"><label for="stu-parent">ชื่อผู้ปกครอง</label><input type="text" id="stu-parent" class="input-form"></div><div class="form-group"><label for="stu-phone">เบอร์โทรศัพท์</label><input type="text" id="stu-phone" class="input-form"></div><div class="form-group"><label for="stu-active">สถานะ</label><select id="stu-active" class="input-form"><option value="true">ใช้งาน (Active)</option><option value="false">ระงับ (Inactive)</option></select></div></div><div class="modal-footer"><span id="stu-loading" style="display:none; color:var(--color-blue); margin-right:15px;"><i class="fas fa-spinner fa-spin"></i> บันทึก...</span><button class="btn btn-secondary" onclick="closeModal('student-modal')">ยกเลิก</button><button data-write class="btn btn-primary" id="btn-save-student" onclick="submitStudent()">บันทึก</button></div></div></div>
 
@@ -198,7 +214,7 @@
             <div class="modal-footer"><button id="cancel-room" class="btn btn-secondary">ยกเลิก</button> <button id="confirm-room" class="btn btn-primary">ยืนยันและบันทึก</button></div>
         </div>
     </div>
-    <script src="js/domain.js?v=2.0.0"></script>
-    <script src="js/app.js?v=2.0.0"></script>
+    <script src="js/domain.js?v=2.1.0"></script>
+    <script src="js/app.js?v=2.1.0"></script>
 </body>
 </html>

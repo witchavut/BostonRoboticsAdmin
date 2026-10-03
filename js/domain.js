@@ -55,7 +55,13 @@
         if (!s) return 'ไม่พบชื่อนักเรียน';
         return s.Nickname && s.Nickname !== s.StudentName ? `${s.Nickname} (${s.StudentName})` : s.StudentName || s.Nickname;
     }
-    const api = { date, time, duration, bool, normalize, today, completed, overlaps, progress, studentName };
+    function calendarDays(month) {
+        const [year, index] = month.split('-').map(Number);
+        const first = new Date(Date.UTC(year, index - 1, 1));
+        const offset = (first.getUTCDay() + 6) % 7;
+        return Array.from({ length: 42 }, (_, i) => new Date(Date.UTC(year, index - 1, 1 - offset + i)).toISOString().slice(0, 10));
+    }
+    const api = { date, time, duration, bool, normalize, today, completed, overlaps, progress, studentName, calendarDays };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.BostonDomain = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
