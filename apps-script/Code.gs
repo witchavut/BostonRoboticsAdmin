@@ -142,6 +142,15 @@ function text_(value, required) {
   return s;
 }
 function safeCell_(value) { return typeof value === 'string' && /^[=+@-]/.test(value) ? "'" + value : value; }
+function textFormat_(range) {
+  try { range.setNumberFormat('@'); }
+  catch (error) {
+    // Table columns own their formats. Keep their type and continue the value write.
+    const message = String(error && error.message || error);
+    if (!/can(?:not|'t|’t) set the number format of cells in a typed column/i.test(message) &&
+        !/ตั้งค่ารูปแบบตัวเลขของเซลล์ในคอลัมน์ที่มีการจัดประเภทไม่ได้/.test(message)) throw error;
+  }
+}
 function nextId_(name, prefix) {
   const key = SCHEMA[name][0];
   const reserved = [], properties = PropertiesService.getScriptProperties().getProperties();
@@ -162,7 +171,7 @@ function write_(name, fields, existing) {
       const column = headers.indexOf(key); if (column < 0) throw new Error('ไม่พบคอลัมน์ ' + key);
       if (arrayColumns.has(column) || formulas[column]) return;
       const cell = sheet.getRange(existing.rowIdx, column + 1);
-      if (['Date', 'EnrollDate', 'StartTime', 'EndTime', 'Phone'].includes(key)) cell.setNumberFormat('@');
+      if (['Date', 'EnrollDate', 'StartTime', 'EndTime', 'Phone'].includes(key)) textFormat_(cell);
       cell.setValue(safeCell_(fields[key]));
     });
   } else {
@@ -195,7 +204,7 @@ function writeNewRows_(name, records) {
     while (column < headers.length) {
       if (!writable[column]) { column++; continue; }
       const first = column; while (column < headers.length && writable[column]) column++;
-      for (let j = first; j < column; j++) if (['Date', 'EnrollDate', 'StartTime', 'EndTime', 'Phone'].includes(headers[j])) sheet.getRange(row + i, j + 1, end - i, 1).setNumberFormat('@');
+      for (let j = first; j < column; j++) if (['Date', 'EnrollDate', 'StartTime', 'EndTime', 'Phone'].includes(headers[j])) textFormat_(sheet.getRange(row + i, j + 1, end - i, 1));
       sheet.getRange(row + i, first + 1, end - i, column - first).setValues(records.slice(i, end).map(record => headers.slice(first, column).map(h => safeCell_(record[h] == null ? '' : record[h]))));
     }
     i = end;
