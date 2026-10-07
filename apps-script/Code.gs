@@ -10,7 +10,7 @@ const SCHEMA = {
   Holidays: ['Date', 'Reason', 'Type', 'Active']
 };
 function json_(value) { return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON); }
-function health_() { return { success: true, version: '2.2', authMode: 'none' }; }
+function health_() { return { success: true, version: '2.2', authMode: 'none', capabilities: ['bootstrap'] }; }
 function doGet(e) {
   if (e && e.parameter && e.parameter.action === 'getHealth') return json_(health_());
   return json_({ success: false, code: 'METHOD_NOT_ALLOWED', message: 'กรุณาเรียกข้อมูลด้วย POST' });
@@ -18,6 +18,7 @@ function doGet(e) {
 function doPost(e) {
   try {
     const request = JSON.parse(e.postData.contents || '{}');
+    if (request.action === 'getBootstrap') return json_(bootstrap_());
     if (request.action === 'getTimeSlots') return json_({ success: true, data: timeSlots_() });
     const reads = { getStudents: 'Students', getCourses: 'Courses', getEnrollments: 'Enrollments', getSchedule: 'Schedule', getHolidays: 'Holidays' };
     if (Object.prototype.hasOwnProperty.call(reads, request.action)) return json_(result_(reads[request.action]));
@@ -34,8 +35,8 @@ function locked_(callback) {
   try { return callback(); } finally { lock.releaseLock(); }
 }
 function hash_(value) { return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(value), Utilities.Charset.UTF_8)); }
-function sheet_(name) {
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(name);
+function sheet_(name, spreadsheet) {
+  const sheet = (spreadsheet || SpreadsheetApp.openById(SPREADSHEET_ID)).getSheetByName(name);
   if (!sheet) throw new Error('ไม่พบชีต ' + name + ' กรุณาตรวจชื่อแท็บ');
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(String).map(s => s.trim());
   const missing = SCHEMA[name].filter(h => !headers.includes(h));
@@ -59,8 +60,8 @@ function time_(value) {
 }
 function minutes_(time) { return +time.slice(0, 2) * 60 + +time.slice(3); }
 function bool_(value) { return value === true || String(value).trim().toUpperCase() === 'TRUE'; }
-function rows_(name) {
-  const sheet = sheet_(name), range = sheet.getDataRange(), raw = range.getValues(), display = range.getDisplayValues(), formulas = range.getFormulas(), headers = display[0].map(h => String(h).trim()), key = SCHEMA[name][0], result = [], arrays = new Set();
+function rows_(name, spreadsheet) {
+  const sheet = sheet_(name, spreadsheet), range = sheet.getDataRange(), raw = range.getValues(), display = range.getDisplayValues(), formulas = range.getFormulas(), headers = display[0].map(h => String(h).trim()), key = SCHEMA[name][0], result = [], arrays = new Set();
   formulas.forEach(row => row.forEach((formula, column) => { if (/\bARRAYFORMULA\s*\(/i.test(formula)) arrays.add(column); }));
   for (let i = 1; i < raw.length; i++) {
     const item = {};
@@ -82,8 +83,19 @@ function rows_(name) {
 }
 function result_(name) { return { success: true, data: rows_(name) }; }
 function ruleError_(code, message) { const error = new Error(message); error.code = code; throw error; }
-function timeSlots_() {
-  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Lists');
+function bootstrap_() {
+  // Reuse one spreadsheet handle only within this request; always read fresh data.
+  const started = Date.now(), spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const collections = { students: 'Students', courses: 'Courses', enrollments: 'Enrollments', schedule: 'Schedule', holidays: 'Holidays', timeSlots: 'Lists' };
+  const data = {}, errors = {};
+  Object.keys(collections).forEach(function (key) {
+    try { data[key] = key === 'timeSlots' ? timeSlots_(spreadsheet) : rows_(collections[key], spreadsheet); }
+    catch (error) { errors[key] = error.message || 'โหลดข้อมูลไม่สำเร็จ'; }
+  });
+  return { success: true, data: data, errors: errors, serverMs: Date.now() - started };
+}
+function timeSlots_(spreadsheet) {
+  const sheet = (spreadsheet || SpreadsheetApp.openById(SPREADSHEET_ID)).getSheetByName('Lists');
   if (!sheet) throw new Error('ไม่พบชีต Lists สำหรับช่วงเวลาเรียน');
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(h => String(h).trim());
   const column = headers.indexOf('TimeSlots');
