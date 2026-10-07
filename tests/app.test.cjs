@@ -45,6 +45,56 @@ const timeSlots = { success: true, data: ['09:00', '09:30', '10:00', '12:00', '1
 const responseFor = action => action === 'getHealth' ? health : action === 'getTimeSlots' ? timeSlots : data;
 const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
 
+test('bootstrap loads the same normalized state with two startup requests', async () => {
+  const { createBackend } = require('./backend-harness.cjs');
+  const backend = createBackend();
+  const app = createApp(action => action === 'getHealth' ? JSON.parse(backend.context.doGet({parameter:{action}}).text) : backend.post(action));
+  await app.context.initApp();
+  assert.deepEqual(app.calls.map(c => c.action), ['getHealth', 'getBootstrap']);
+  assert.equal(app.run('canWrite()'), true);
+  assert.equal(app.run('state.schedule[0].Date'), '2026-10-03');
+  assert.match(app.element('connection-status').textContent, /โหลดข้อมูล.*วินาที.*แบบรวม/);
+  await app.context.loadData();
+  assert.equal(app.calls.length, 3);
+});
+
+test('bootstrap failures and missing collections block writes and refresh recovers', async () => {
+  const { createBackend } = require('./backend-harness.cjs');
+  for (const failure of ['timeout', 'missing', 'partial', 'invalidSlots']) {
+    const backend = createBackend(); let fail = true;
+    const app = createApp(action => {
+      if (action === 'getHealth') return { ...health, capabilities: ['bootstrap'] };
+      if (fail && failure === 'timeout') throw abortError();
+      const reply = backend.post(action);
+      if (fail && failure === 'missing') delete reply.data.schedule;
+      if (fail && failure === 'partial') reply.errors.schedule = 'sheet unavailable';
+      if (fail && failure === 'invalidSlots') reply.data.timeSlots = ['09:00'];
+      return reply;
+    });
+    await app.context.initApp();
+    assert.equal(app.run('canWrite()'), false, failure);
+    assert.equal(app.element('refresh-data').disabled, false);
+    assert.equal(app.calls.length, 2); // No retry storm after a failed batch.
+    fail = false;
+    await app.context.loadData();
+    assert.equal(app.run('canWrite()'), true);
+    assert.equal(app.timers.size, 0);
+  }
+});
+
+test('bootstrap keeps writes disabled and prevents duplicate refresh while pending', async () => {
+  let complete;
+  const app = createApp(() => new Promise(resolve => { complete = resolve; }));
+  app.run('modernAPI = true; supportsBootstrap = true;');
+  const pending = app.context.loadData();
+  await app.context.loadData();
+  assert.equal(app.calls.length, 1);
+  assert.equal(app.run('canWrite()'), false);
+  complete(require('./backend-harness.cjs').createBackend().post('getBootstrap'));
+  await pending;
+  assert.equal(app.run('canWrite()'), true);
+});
+
 test('health timeout does not request data or misreport an old deployment; refresh recovers', async () => {
   let fail = true;
   const app = createApp(action => { if (fail) throw abortError(); return responseFor(action); });

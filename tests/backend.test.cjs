@@ -1,5 +1,30 @@
 const { test } = require('node:test'), assert = require('node:assert/strict');
 const { createBackend } = require('./backend-harness.cjs');
+
+test('bootstrap reuses one spreadsheet and preserves individual read results and formulas', () => {
+ const b=createBackend(); let opens=0;
+ const open=b.context.SpreadsheetApp.openById;
+ b.context.SpreadsheetApp.openById=(id)=>{opens++;return open(id);};
+ b.setFormula('Schedule',2,7,'=ROW()-1','Session 1');
+ const batch=b.post('getBootstrap');
+ assert.equal(opens,1); assert.equal(batch.success,true); assert.deepEqual(batch.errors,{});
+ for(const key of Object.keys(batch.data)) {
+   const action='get'+key[0].toUpperCase()+key.slice(1);
+   assert.deepEqual(batch.data[key],b.post(action).data);
+ }
+ assert.equal(b.writes(),0);
+ assert.ok(batch.serverMs>=0);
+ b.data.Students[1][1]='Changed directly in Sheets';
+ assert.equal(b.post('getBootstrap').data.students[0].StudentName,'Changed directly in Sheets');
+});
+
+test('bootstrap reports a broken sheet without dropping other collections', () => {
+ const b=createBackend(); b.data.Schedule[0][0]='InvalidHeader';
+ const batch=b.post('getBootstrap');
+ assert.equal(batch.success,true); assert.match(batch.errors.schedule,/Schedule/);
+ assert.equal(batch.data.schedule,undefined); assert.equal(batch.data.students.length,2);
+ assert.ok(batch.data.timeSlots.length>2); assert.equal(b.writes(),0);
+});
 test('version 2.2 reads and writes without a password or token',()=>{
  const b=createBackend(); b.props.delete('ADMIN_PASSWORD');
  const health=JSON.parse(b.context.doGet({parameter:{action:'getHealth'}}).text);
