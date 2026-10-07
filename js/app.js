@@ -40,7 +40,7 @@ async function request(action, payload, post = false) {
     try {
         const options = { signal: controller.signal, cache: 'no-store', redirect: 'follow' };
         if (post) Object.assign(options, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload }) });
-        const response = await fetch(post ? API_URL : `${API_URL}?action=${encodeURIComponent(action)}`, options);
+        const response = await fetch(post ? API_URL : `${API_URL}?action=${encodeURIComponent(action)}&_=${Date.now()}`, options);
         if (!response.ok) throw new Error(`ติดต่อระบบไม่สำเร็จ (${response.status})`);
         const raw = await response.text(); let result;
         try { result = JSON.parse(raw); } catch { throw new Error('ไม่ได้รับข้อมูล JSON จาก Apps Script กรุณาตรวจสอบ URL และสิทธิ์เข้าถึง deployment'); }
