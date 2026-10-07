@@ -29,8 +29,9 @@ function createApp(fetchImpl) {
     fetch: async (url, options) => {
       const body = options.body ? JSON.parse(options.body) : {};
       const action = body.action || new URL(url).searchParams.get('action');
-      calls.push({ action, options, body });
+      calls.push({ action, options, body, url });
       const value = await fetchImpl(action, options, body);
+      if (value?.httpStatus) return { ok: false, status: value.httpStatus };
       return { ok: true, text: async () => typeof value === 'string' ? value : JSON.stringify(value) };
     }
   });
@@ -44,6 +45,29 @@ const data = { success: true, data: [] };
 const timeSlots = { success: true, data: ['09:00', '09:30', '10:00', '12:00', '13:00', '15:00'] };
 const responseFor = action => action === 'getHealth' ? health : action === 'getTimeSlots' ? timeSlots : data;
 const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
+
+test('lost enrollment response retries same request ID without duplicate rows and uses fresh URLs', async () => {
+  const backend=require('./backend-harness.cjs').createBackend(); let count=0;
+  const app=createApp((action,options,body)=>{const saved=backend.post(action,body.payload);return ++count===1?{httpStatus:404}:saved;});
+  const payload={StudentID:'STU001',Course:'JuniorBuilder',Level:'Lv2',EnrollmentStatus:'กำลังเรียน',PaymentStatus:'ยังไม่ชำระ',SessionCount:1,requestId:'lost-response',Sessions:[{Date:'2027-01-05',StartTime:'13:00',EndTime:'15:00'}]};
+  const result=await app.context.request('saveEnrollment',payload,true);
+  assert.equal(result.success,true);assert.equal(app.calls.length,2);
+  assert.equal(backend.data.Enrollments.length,4);assert.equal(backend.data.Schedule.length,3);
+  assert.notEqual(app.calls[0].url,app.calls[1].url);
+  assert.equal(app.calls[0].options.body,app.calls[1].options.body);
+  assert.ok(app.calls.every(c=>new URL(c.url).searchParams.has('_')));
+});
+
+test('read 404 retries are bounded; non-idempotent writes are never replayed', async () => {
+  const read=createApp(()=>({httpStatus:404}));
+  await assert.rejects(read.context.request('getHealth'),/404/);assert.equal(read.calls.length,3);
+  const write=createApp(()=>({httpStatus:404}));
+  await assert.rejects(write.context.request('saveStudent',{StudentName:'Test'},true),/ยังยืนยันผลบันทึกไม่ได้/);
+  assert.equal(write.calls.length,1);
+  const enrollment=createApp(()=>({httpStatus:404}));
+  await assert.rejects(enrollment.context.request('saveEnrollment',{requestId:'same'},true),/ฟอร์มเดิม/);
+  assert.equal(enrollment.calls.length,3);
+});
 
 test('readGet avoids POST redirects while saves remain POST with their body', async () => {
   const backend = require('./backend-harness.cjs').createBackend();
@@ -125,10 +149,10 @@ test('health timeout does not request data or misreport an old deployment; refre
 });
 
 test('network and malformed health replies do not start data requests', async () => {
-  for (const reply of [() => { throw new TypeError('Failed to fetch'); }, () => '<html>Sign in</html>', () => null]) {
+  for (const [reply, attempts] of [[() => { throw new TypeError('Failed to fetch'); }, 3], [() => '<html>Sign in</html>', 1], [() => null, 1]]) {
     const app = createApp(reply);
     await app.context.initApp();
-    assert.deepEqual(app.calls.map(c => c.action), ['getHealth']);
+    assert.deepEqual(app.calls.map(c => c.action), Array(attempts).fill('getHealth'));
     assert.equal(app.run('modernAPI'), false);
     assert.doesNotMatch(app.element('connection-status').textContent, /รุ่นเดิม|อัปเดต Code.gs/);
     assert.equal(app.element('refresh-data').disabled, false);
