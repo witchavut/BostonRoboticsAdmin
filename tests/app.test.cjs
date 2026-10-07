@@ -353,6 +353,51 @@ function fillStudentHistory(app) {
   `);
 }
 
+test('saving suspension hides every schedule view and reactivation restores appointments', async () => {
+  const app = createApp((action, options, body) => ({success:true,data:[
+    {StudentID:'S1',StudentName:'Suspended Learner',Active:body.payload.Active},
+    {StudentID:'S2',StudentName:'Visible Learner',Active:true}
+  ]}));
+  app.run(`modernAPI=true; Object.keys(state).forEach(k=>ready[k]=true);
+    state.students=[{StudentID:'S1',StudentName:'Suspended Learner',Active:true},{StudentID:'S2',StudentName:'Visible Learner',Active:true}];
+    state.courses=[{Course:'Robotics',Level:'LV1',SessionCount:4,TotalHours:8}];
+    state.enrollments=[{EnrollmentID:'E1',StudentID:'S1',Course:'Robotics',Level:'LV1'},{EnrollmentID:'E2',StudentID:'S2',Course:'Robotics',Level:'LV1'}];
+    state.schedule=state.enrollments.map((e,i)=>({ScheduleID:'SCH'+i,EnrollmentID:e.EnrollmentID,Date:D.today(),StartTime:'10:00',EndTime:'12:00',Duration:2,SessionNo:'Session 1'}));
+    selectedCalendarDate=D.today(); calendarMonth=D.today().slice(0,7);
+    renderAll=()=>{renderStudents();updateScheduleEnrollmentDropdown();renderScheduleView();renderDashboard();renderCalendar();renderCalendarDay();};
+  `);
+  const stored = app.run('JSON.stringify(state.schedule)');
+  app.element('sch-select-student').value='S1';
+  await app.context.save('saveStudent',{StudentID:'S1',Active:false},'students','student-modal','stu-loading');
+  for(const id of ['calendar-days','calendar-day-list','today-schedule-tbody']) {
+    assert.doesNotMatch(app.element(id).innerHTML,/Suspended Learner/);
+    assert.match(app.element(id).innerHTML,/Visible Learner/);
+  }
+  assert.equal(app.element('dash-today-classes').textContent,'1 นัด');
+  assert.match(app.element('students-tbody').innerHTML,/Suspended Learner/);
+  assert.ok(!app.element('sch-select-student').children.some(o=>o.value==='S1'));
+  assert.equal(app.element('sch-management-container').style.display,'none');
+  assert.equal(app.element('sch-enrollment-groups').innerHTML,'');
+  assert.equal(app.run('D.enrollmentProgress(state.enrollments[0],state).scheduled'),1);
+  assert.equal(app.run('JSON.stringify(state.schedule)'),stored);
+  await app.context.save('saveStudent',{StudentID:'S1',Active:true},'students','student-modal','stu-loading');
+  for(const id of ['calendar-days','calendar-day-list','today-schedule-tbody']) assert.match(app.element(id).innerHTML,/Suspended Learner/);
+  assert.ok(app.element('sch-select-student').children.some(o=>o.value==='S1'));
+  assert.equal(app.element('dash-today-classes').textContent,'2 นัด');
+  assert.equal(app.run('JSON.stringify(state.schedule)'),stored);
+});
+
+test('suspended duplicate records cannot reappear through merged history or PNG export', async () => {
+  const app=createApp(responseFor);fillStudentHistory(app);
+  app.run("state.students.find(s=>s.StudentID==='S1copy').Active=false;");
+  app.element('sch-select-student').value='S1';app.context.renderScheduleView();
+  assert.doesNotMatch(app.element('sch-enrollment-groups').innerHTML,/data-export-schedule="E1"/);
+  assert.match(app.element('sch-enrollment-groups').innerHTML,/data-export-schedule="E2"/);
+  await app.context.downloadStudentSchedule('E1');
+  assert.equal(app.element('schedule-export-status').textContent,'');
+  assert.equal(app.run('D.studentEnrollments("S1",state).length'),2);
+});
+
 test('personal appointment selector deduplicates the same full name and searches names only', () => {
   const app = createApp(responseFor);
   fillStudentHistory(app);
