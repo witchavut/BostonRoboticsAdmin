@@ -6,6 +6,7 @@ let ready = {}, errors = {}, modernAPI = false, busy = false, loading = false;
 let supportsBootstrap = false, supportsGetReads = false;
 let calendarMonth = D.today().slice(0, 7), selectedCalendarDate = '';
 let enrollmentRequestId = '';
+let requestSequence = 0;
 let scheduleSearch = null, exportingSchedule = false;
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -43,8 +44,23 @@ async function request(action, payload, post = false) {
     try {
         const options = { signal: controller.signal, cache: 'no-store', redirect: 'follow' };
         if (post) Object.assign(options, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action, payload }) });
-        const response = await fetch(post ? API_URL : `${API_URL}?action=${encodeURIComponent(action)}&_=${Date.now()}`, options);
-        if (!response.ok) throw new Error(`ติดต่อระบบไม่สำเร็จ (${response.status})`);
+        // Apps Script redirects responses to a temporary URL. Never reuse its cached redirect.
+        // Only reads and new enrollments protected by the backend request ID may be retried.
+        const retrySafe = action.startsWith('get') || (action === 'saveEnrollment' && !payload?.EnrollmentID && !!payload?.requestId);
+        let response;
+        for (let attempt = 0; attempt < (retrySafe ? 3 : 1); attempt++) {
+            const url = `${API_URL}?_=${Date.now()}-${++requestSequence}${post ? '' : `&action=${encodeURIComponent(action)}`}`;
+            try { response = await fetch(url, options); }
+            catch (error) {
+                if (retrySafe && attempt < 2 && error instanceof TypeError && !controller.signal.aborted) continue;
+                throw error;
+            }
+            if (response.ok || !retrySafe || attempt === 2 || ![404, 502, 503, 504].includes(response.status)) break;
+        }
+        if (!response.ok) {
+            const error = new Error(`ติดต่อระบบไม่สำเร็จ (${response.status})`);
+            error.transportFailure = true; throw error;
+        }
         const raw = await response.text(); let result;
         try { result = JSON.parse(raw); } catch { throw new Error('ไม่ได้รับข้อมูล JSON จาก Apps Script กรุณาตรวจสอบ URL และสิทธิ์เข้าถึง deployment'); }
         if (!result || typeof result !== 'object') throw new Error('รูปแบบข้อมูลจาก Apps Script ไม่ถูกต้อง');
@@ -55,7 +71,7 @@ async function request(action, payload, post = false) {
         if (!result.success && !['CONFLICT', 'HOLIDAY'].includes(result.code)) throw new Error(result.message || 'ระบบไม่สามารถทำรายการได้');
         return result;
     } catch (error) {
-        if (action.startsWith('save') && (error.name === 'AbortError' || error instanceof TypeError)) throw new Error('ยังยืนยันผลบันทึกไม่ได้ กรุณาโหลดข้อมูลใหม่ก่อนบันทึกซ้ำ');
+        if (action.startsWith('save') && (error.name === 'AbortError' || error instanceof TypeError || error.transportFailure)) throw new Error(action === 'saveEnrollment' && !payload?.EnrollmentID && payload?.requestId ? 'ยังยืนยันผลบันทึกไม่ได้ ข้อมูลในฟอร์มยังอยู่ กดบันทึกซ้ำในฟอร์มเดิมได้ ระบบใช้รหัสคำขอเดิมป้องกันรายการซ้ำ' : 'ยังยืนยันผลบันทึกไม่ได้ กรุณาโหลดข้อมูลใหม่ก่อนบันทึกซ้ำ');
         if (error.name === 'AbortError') throw new Error('การเชื่อมต่อใช้เวลานานเกินไป กรุณาลองใหม่');
         throw error;
     } finally { clearTimeout(timer); }
