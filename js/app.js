@@ -3,6 +3,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbyE4ZEXNnTrqec6xnBRgabR
 const D = BostonDomain, state = { students: [], courses: [], enrollments: [], schedule: [], holidays: [], timeSlots: [] };
 const labels = { students: 'นักเรียน', courses: 'หลักสูตร', enrollments: 'ลงทะเบียนเรียน', schedule: 'ตารางเรียน', holidays: 'วันหยุด', timeSlots: 'ช่วงเวลาเรียน' };
 let ready = {}, errors = {}, modernAPI = false, busy = false, loading = false;
+let supportsBootstrap = false;
 let calendarMonth = D.today().slice(0, 7), selectedCalendarDate = '';
 let enrollmentRequestId = '';
 let scheduleSearch = null, exportingSchedule = false;
@@ -59,9 +60,10 @@ async function request(action, payload, post = false) {
 async function initApp() {
     if (loading || busy) return;
     loading = true; renderAll(); statusMessage('กำลังตรวจสอบการเชื่อมต่อ…');
-    modernAPI = false;
+    modernAPI = false; supportsBootstrap = false;
     try {
         const health = await request('getHealth'); modernAPI = health.version === '2.2' && health.authMode === 'none';
+        supportsBootstrap = Array.isArray(health.capabilities) && health.capabilities.includes('bootstrap');
         if (!modernAPI) throw new Error(health.version ? `Apps Script รุ่น ${health.version} ยังไม่รองรับหน้าเว็บนี้ กรุณาใช้ Code.gs รุ่น 2.2 และ Deploy > New version` : 'ตรวจสอบรุ่น Apps Script ไม่สำเร็จ กรุณาตรวจสอบ URL และ deployment');
     } catch (error) {
         modernAPI = false; statusMessage(`ตรวจสอบการเชื่อมต่อไม่สำเร็จ: ${error.message} • กดโหลดข้อมูลใหม่เพื่อลองอีกครั้ง`, 'error');
@@ -71,10 +73,17 @@ async function initApp() {
 async function loadData() {
     if (loading || busy || !modernAPI) return;
     loading = true; errors = {}; ready = {}; renderAll(); statusMessage('กำลังโหลดข้อมูล…');
-    // Avoid starting five Apps Script executions at once on a cold deployment.
+    const started = Date.now();
+    let batch;
+    if (supportsBootstrap) {
+        try { batch = await request('getBootstrap', {}, true); }
+        catch (error) { batch = { errors: Object.fromEntries(Object.keys(state).map(key => [key, error.message])) }; }
+    }
+    // Older deployments still work until the Apps Script update is published.
     for (const key of Object.keys(state)) {
         try {
-            const result = await request('get' + key[0].toUpperCase() + key.slice(1), {}, true);
+            if (batch?.errors?.[key]) throw new Error(batch.errors[key]);
+            const result = supportsBootstrap ? { data: batch?.data?.[key] } : await request('get' + key[0].toUpperCase() + key.slice(1), {}, true);
             if (!Array.isArray(result.data)) throw new Error('รูปแบบข้อมูลไม่ถูกต้อง');
             state[key] = key === 'timeSlots' ? [...new Set(result.data.map(D.time).filter(Boolean))].sort() : D.normalize(key, result.data); ready[key] = true;
             if (key === 'timeSlots' && state[key].length < 2) throw new Error('ไม่พบช่วงเวลาในคอลัมน์ TimeSlots ของชีต Lists');
@@ -85,7 +94,7 @@ async function loadData() {
     }
     loading = false; const failed = Object.keys(errors);
     const detail = failed.map(k => `${labels[k]}: ${errors[k]}`).join(' • ');
-    statusMessage(detail || 'เชื่อมต่อแล้ว • คำนวณชั่วโมงตามเวลาไทย', failed.length ? 'error' : 'success');
+    statusMessage(detail || `เชื่อมต่อแล้ว • โหลดข้อมูล ${((Date.now() - started) / 1000).toFixed(1)} วินาที • ${supportsBootstrap ? 'แบบรวม' : 'แบบเดิม'} • คำนวณชั่วโมงตามเวลาไทย`, failed.length ? 'error' : 'success');
     renderAll();
 }
 function scheduleStatus(s) { return !s.Date || !s.EndTime ? 'ตรวจสอบวันเวลา' : D.completed(s) ? 'ครบเวลานัดแล้ว' : 'ยังไม่ครบเวลานัด'; }
