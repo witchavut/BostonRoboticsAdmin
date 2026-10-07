@@ -11,6 +11,9 @@ const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = value => Number(value || 0).toLocaleString('th-TH', { maximumFractionDigits: 2 });
 const student = id => state.students.find(s => s.StudentID === id);
+// Visibility is separate from stored appointments, progress and booking conflicts.
+const scheduleStudentState = () => ({ ...state, students: state.students.filter(s => s.Active !== false) });
+const visibleSchedule = s => D.validSchedule(s, state) && student(state.enrollments.find(e => e.EnrollmentID === s.EnrollmentID)?.StudentID)?.Active !== false;
 const course = e => state.courses.find(c => c.Course === e.Course && c.Level === e.Level);
 const nameOf = e => D.studentName(student(e?.StudentID));
 const dateText = d => d ? d.split('-').reverse().join('/') : 'ตรวจสอบวันที่';
@@ -106,7 +109,7 @@ function renderDashboard() {
     $('dash-trial-students').textContent = available ? `${stats.trials} คน` : '—';
     $('dash-active-courses').innerHTML = available ? stats.activeByCourse.map(item => `<div class="course-count"><strong>${esc(item.course)}</strong><span>${item.count} คน</span></div>`).join('') || '<p class="subtext">ไม่มีนักเรียนที่กำลังเรียน</p>' : '<p class="subtext">รอข้อมูลนักเรียนและตารางเรียน</p>';
     $('dash-unpaid').textContent = hasData('enrollments') ? `${state.enrollments.filter(e => ['ยังไม่ชำระ', 'ชำระบางส่วน'].includes(e.PaymentStatus)).length} รายการ` : '—';
-    const sessions = state.schedule.filter(s => s.Date === D.today() && D.validSchedule(s, state)).sort((a, b) => a.StartTime.localeCompare(b.StartTime));
+    const sessions = state.schedule.filter(s => s.Date === D.today() && visibleSchedule(s)).sort((a, b) => a.StartTime.localeCompare(b.StartTime));
     $('dash-today-classes').textContent = hasData('schedule') ? `${sessions.length} นัด` : '—';
     table('today-schedule-tbody', 4, sessions.map(s => { const e = state.enrollments.find(e => e.EnrollmentID === s.EnrollmentID); return `<tr><td>${esc(s.StartTime)}–${esc(s.EndTime)}</td><td>${esc(nameOf(e))}</td><td>${esc(e ? `${e.Course} / ${e.Level}` : 'ไม่พบหลักสูตร')}</td><td>${badge(scheduleStatus(s))}</td></tr>`; }).join(''), ['students', 'enrollments', 'schedule'], 'วันนี้ไม่มีนัดเรียน');
 }
@@ -126,14 +129,16 @@ function renderHolidays() { table('holidays-tbody', 5, [...state.holidays].sort(
 function updateScheduleEnrollmentDropdown() {
     const select = $('sch-select-student'), previous = select.value, q = $('search-schedule').value.trim().toLowerCase();
     select.replaceChildren(new Option('-- เลือกนักเรียน --', ''));
-    D.studentGroups(state).filter(group => group.enrollments.length && D.studentName(group.student).toLowerCase().includes(q)).forEach(group => select.add(new Option(D.studentName(group.student), group.student.StudentID)));
+    D.studentGroups(scheduleStudentState()).filter(group => group.enrollments.length && D.studentName(group.student).toLowerCase().includes(q)).forEach(group => select.add(new Option(D.studentName(group.student), group.student.StudentID)));
     select.value = previous; if (select.selectedIndex < 0) select.value = '';
     scheduleSearch?.refresh();
 }
 function renderScheduleView() {
     const selected = student($('sch-select-student').value);
-    $('sch-management-container').style.display = selected ? 'block' : 'none'; if (!selected) return;
-    const enrollments = D.studentEnrollments(selected.StudentID, state);
+    const visible = selected && selected.Active !== false;
+    $('sch-management-container').style.display = visible ? 'block' : 'none';
+    if (!visible) { $('sch-student-summary').innerHTML = ''; $('sch-enrollment-groups').innerHTML = ''; $('schedule-export-status').textContent = ''; return; }
+    const enrollments = D.studentEnrollments(selected.StudentID, scheduleStudentState());
     $('sch-student-summary').innerHTML = `<strong>${esc(D.studentName(selected))}</strong><span>${enrollments.length} รายการลงทะเบียน</span>`;
     if (!hasData('students', 'courses', 'enrollments', 'schedule')) { $('sch-enrollment-groups').innerHTML = '<p class="empty-state">รอข้อมูลตารางเรียน กรุณาโหลดข้อมูลให้ครบ</p>'; return; }
     $('sch-enrollment-groups').innerHTML = enrollments.map(e => {
@@ -146,7 +151,7 @@ function renderScheduleView() {
 async function downloadStudentSchedule(enrollmentId) {
     if (exportingSchedule || busy || loading || !hasData('students', 'courses', 'enrollments', 'schedule')) return;
     const selected = student($('sch-select-student').value);
-    const enrollment = selected && D.studentEnrollments(selected.StudentID, state).find(e => e.EnrollmentID === enrollmentId);
+    const enrollment = selected && D.studentEnrollments(selected.StudentID, scheduleStudentState()).find(e => e.EnrollmentID === enrollmentId);
     if (!enrollment) return;
     const status = $('schedule-export-status'), now = new Date();
     exportingSchedule = true; updateButtons(); status.textContent = 'กำลังสร้างภาพตารางเรียน…';
@@ -195,7 +200,7 @@ function renderCalendar() {
     $('calendar-month').textContent = new Intl.DateTimeFormat('th-TH', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, 1)));
     const keys = ['students', 'courses', 'enrollments', 'schedule', 'holidays'];
     const available = hasData(...keys), today = D.today();
-    const groups = available ? calendarTimeGroups(state.schedule.filter(s => D.validSchedule(s, state))) : [];
+    const groups = available ? calendarTimeGroups(state.schedule.filter(visibleSchedule)) : [];
     $('calendar-message').textContent = loading ? 'กำลังโหลดตารางเรียน…' : !available ? 'ยังโหลดตารางเรียนไม่ครบ กรุณากดโหลดข้อมูลใหม่' : 'เลือกวันที่เพื่อดูรายการนัดเรียนทั้งหมด';
     $('calendar-days').innerHTML = D.calendarDays(calendarMonth).map(date => {
         const own = groups.filter(group => group.date === date), appointmentCount = own.reduce((sum, group) => sum + group.sessions.length, 0);
@@ -220,7 +225,7 @@ function renderCalendarDay() {
         $('calendar-day-list').innerHTML = '<p class="empty-state">ยังโหลดข้อมูลไม่ครบ กรุณาโหลดข้อมูลใหม่</p>'; return;
     }
     const holidays = state.holidays.filter(h => h.Active && h.Date === selectedCalendarDate);
-    const groups = calendarTimeGroups(state.schedule.filter(s => s.Date === selectedCalendarDate && D.validSchedule(s, state)));
+    const groups = calendarTimeGroups(state.schedule.filter(s => s.Date === selectedCalendarDate && visibleSchedule(s)));
     $('calendar-day-list').innerHTML = holidays.map(h => `<p class="calendar-holiday-detail">วันหยุด: ${esc(h.Reason)}</p>`).join('') + (groups.length ? groups.map(group => {
         const learners = group.sessions.map(s => {
             const info = calendarEvent(s);
@@ -235,7 +240,7 @@ function editCalendarSchedule(id) {
     const session = state.schedule.find(s => s.ScheduleID === id); if (!session) return;
     $('search-schedule').value = ''; updateScheduleEnrollmentDropdown();
     const enrollment = state.enrollments.find(e => e.EnrollmentID === session.EnrollmentID);
-    const group = D.studentGroups(state).find(g => g.studentIds.includes(enrollment?.StudentID));
+    const group = D.studentGroups(scheduleStudentState()).find(g => g.studentIds.includes(enrollment?.StudentID));
     $('sch-select-student').value = group?.student.StudentID || ''; renderScheduleView();
     closeModal('calendar-day-modal'); openScheduleModal('edit', id);
 }
@@ -375,7 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('menu-toggle').addEventListener('click', () => $('sidebar').classList.toggle('open')); $('search-student').addEventListener('input', renderStudents);
     scheduleSearch = BostonStudentSearch.create({
         input: $('search-schedule'), list: $('schedule-student-options'), status: $('schedule-search-status'),
-        getItems: () => D.studentGroups(state).filter(group => group.enrollments.length).map(group => ({ id: group.student.StudentID, label: D.studentName(group.student) })),
+        getItems: () => D.studentGroups(scheduleStudentState()).filter(group => group.enrollments.length).map(group => ({ id: group.student.StudentID, label: D.studentName(group.student) })),
         onQueryChange: () => { $('sch-select-student').value = ''; $('schedule-export-status').textContent = ''; updateScheduleEnrollmentDropdown(); renderScheduleView(); },
         onSelect: item => { updateScheduleEnrollmentDropdown(); $('sch-select-student').value = item.id; renderScheduleView(); }
     });
