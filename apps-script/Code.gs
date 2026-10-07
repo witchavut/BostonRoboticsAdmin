@@ -10,18 +10,29 @@ const SCHEMA = {
   Holidays: ['Date', 'Reason', 'Type', 'Active']
 };
 function json_(value) { return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON); }
-function health_() { return { success: true, version: '2.2', authMode: 'none', capabilities: ['bootstrap'] }; }
+function health_() { return { success: true, version: '2.2', authMode: 'none', capabilities: ['bootstrap', 'readGet'] }; }
 function doGet(e) {
-  if (e && e.parameter && e.parameter.action === 'getHealth') return json_(health_());
-  return json_({ success: false, code: 'METHOD_NOT_ALLOWED', message: 'กรุณาเรียกข้อมูลด้วย POST' });
+  try {
+    const action = e && e.parameter && e.parameter.action;
+    if (action === 'getHealth') return json_(health_());
+    const result = readAction_(action);
+    if (result) return json_(result);
+    return json_({ success: false, code: 'METHOD_NOT_ALLOWED', message: 'คำสั่งบันทึกต้องใช้ POST พร้อมข้อมูลใน body' });
+  } catch (error) {
+    return json_({ success: false, code: error.code || 'ERROR', message: error.message || 'อ่านข้อมูลไม่สำเร็จ' });
+  }
+}
+function readAction_(action) {
+  if (action === 'getBootstrap') return bootstrap_();
+  if (action === 'getTimeSlots') return { success: true, data: timeSlots_() };
+  const reads = { getStudents: 'Students', getCourses: 'Courses', getEnrollments: 'Enrollments', getSchedule: 'Schedule', getHolidays: 'Holidays' };
+  return Object.prototype.hasOwnProperty.call(reads, action) ? result_(reads[action]) : null;
 }
 function doPost(e) {
   try {
     const request = JSON.parse(e.postData.contents || '{}');
-    if (request.action === 'getBootstrap') return json_(bootstrap_());
-    if (request.action === 'getTimeSlots') return json_({ success: true, data: timeSlots_() });
-    const reads = { getStudents: 'Students', getCourses: 'Courses', getEnrollments: 'Enrollments', getSchedule: 'Schedule', getHolidays: 'Holidays' };
-    if (Object.prototype.hasOwnProperty.call(reads, request.action)) return json_(result_(reads[request.action]));
+    const readResult = readAction_(request.action);
+    if (readResult) return json_(readResult);
     const writes = { saveStudent: saveStudent_, saveEnrollment: saveEnrollment_, saveSchedule: saveSchedule_, saveHoliday: saveHoliday_ };
     if (!Object.prototype.hasOwnProperty.call(writes, request.action)) return json_({ success: false, code: 'UNKNOWN_ACTION', message: 'ไม่พบคำสั่งที่ร้องขอ' });
     return json_(locked_(function () { return writes[request.action](request.payload || {}); }));
