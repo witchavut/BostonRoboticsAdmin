@@ -45,6 +45,22 @@ const timeSlots = { success: true, data: ['09:00', '09:30', '10:00', '12:00', '1
 const responseFor = action => action === 'getHealth' ? health : action === 'getTimeSlots' ? timeSlots : data;
 const abortError = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
 
+test('readGet avoids POST redirects while saves remain POST with their body', async () => {
+  const backend = require('./backend-harness.cjs').createBackend();
+  const app = createApp((action, options, body) => {
+    if (options.method === 'POST' && action.startsWith('get')) return {success:false,code:'METHOD_NOT_ALLOWED',message:'กรุณาเรียกข้อมูลด้วย POST'};
+    return options.method === 'POST' ? backend.post(action,body.payload) : JSON.parse(backend.context.doGet({parameter:{action}}).text);
+  });
+  await app.context.initApp();
+  assert.equal(app.run('canWrite()'),true);
+  assert.deepEqual(app.calls.map(c=>c.action),['getHealth','getBootstrap']);
+  assert.ok(app.calls.every(c=>c.options.method !== 'POST' && !c.options.body));
+  await app.context.request('saveStudent',{StudentName:'Transport test',Active:true},true);
+  assert.equal(app.calls[2].options.method,'POST');
+  assert.equal(app.calls[2].body.payload.StudentName,'Transport test');
+  assert.equal(backend.writes(),1);
+});
+
 test('bootstrap loads the same normalized state with two startup requests', async () => {
   const { createBackend } = require('./backend-harness.cjs');
   const backend = createBackend();

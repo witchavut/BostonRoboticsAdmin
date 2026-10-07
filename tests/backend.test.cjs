@@ -1,6 +1,21 @@
 const { test } = require('node:test'), assert = require('node:assert/strict');
 const { createBackend } = require('./backend-harness.cjs');
 
+test('GET allows only read actions, matches POST data, and never saves', () => {
+ const b=createBackend(), get=action=>JSON.parse(b.context.doGet({parameter:{action}}).text);
+ assert.ok(get('getHealth').capabilities.includes('readGet'));
+ for(const action of ['getStudents','getCourses','getEnrollments','getSchedule','getHolidays','getTimeSlots','getBootstrap']) {
+   assert.deepEqual(get(action).data,b.post(action).data);
+ }
+ for(const action of ['saveStudent','saveEnrollment','saveSchedule','saveHoliday','toString',undefined]) {
+   assert.equal(get(action).code,'METHOD_NOT_ALLOWED');
+ }
+ assert.equal(b.writes(),0);
+ b.data.Students[0][0]='Broken';
+ assert.equal(get('getStudents').success,false);
+ assert.match(get('getStudents').message,/Students/);
+});
+
 test('bootstrap reuses one spreadsheet and preserves individual read results and formulas', () => {
  const b=createBackend(); let opens=0;
  const open=b.context.SpreadsheetApp.openById;
