@@ -21,6 +21,32 @@ function confirm(b,action,p) {
   return r;
 }
 
+test('existing student can register a future next level in typed columns and retry without duplicates',()=>{
+  for(const message of ["Can't set the number format of cells in a typed column.", 'ตั้งค่ารูปแบบตัวเลขของเซลล์ในคอลัมน์ที่มีการจัดประเภทไม่ได้']) {
+    const b=createBackend(), oldEnrollment=JSON.stringify(b.data.Enrollments[1]), oldSchedule=JSON.stringify(b.data.Schedule[1]);
+    for(const key of ['Enrollments:7','Schedule:3','Schedule:4','Schedule:5']) b.formatErrors.set(key,message);
+    const p=enrollment(2,{StudentID:'STU001',requestId:'future-next-level',Sessions:[{Date:'2027-01-05',StartTime:'13:00',EndTime:'15:00'},{Date:'2027-01-12',StartTime:'13:00',EndTime:'15:00'}]});
+    const r=b.post('saveEnrollment',p);assert.equal(r.success,true,r.message);
+    assert.equal(r.data.find(e=>e.EnrollmentID===r.EnrollmentID).Level,'Lv2');
+    assert.equal(r.schedule.filter(s=>s.EnrollmentID===r.EnrollmentID).length,2);
+    assert.equal(r.schedule.find(s=>s.EnrollmentID===r.EnrollmentID).Date,'2027-01-05');
+    assert.equal(JSON.stringify(b.data.Enrollments[1]),oldEnrollment);assert.equal(JSON.stringify(b.data.Schedule[1]),oldSchedule);
+    const count=b.writes(),retry=b.post('saveEnrollment',p);assert.equal(retry.EnrollmentID,r.EnrollmentID);assert.equal(b.writes(),count);
+    const session=r.schedule.find(s=>s.EnrollmentID===r.EnrollmentID);
+    assert.equal(b.post('saveSchedule',{...session,Date:'2027-01-06'}).success,true);
+  }
+});
+
+test('pending enrollment recovers from a formatting failure without duplicating saved metadata',()=>{
+  const b=createBackend(),p=enrollment(1,{StudentID:'STU001',requestId:'recover-format'});
+  b.formatErrors.set('Schedule:3','Spreadsheet temporarily unavailable');
+  const failed=b.post('saveEnrollment',p);assert.equal(failed.success,false);assert.match(failed.message,/temporarily unavailable/);
+  assert.equal(b.data.Enrollments.length,4);assert.equal(b.data.Schedule.length,2);
+  b.formatErrors.set('Schedule:3',"Can't set the number format of cells in a typed column.");
+  const recovered=b.post('saveEnrollment',p);assert.equal(recovered.success,true,recovered.message);
+  assert.equal(b.data.Enrollments.length,4);assert.equal(b.data.Schedule.length,3);
+});
+
 test('time slots come from Lists, retain late closing times, and reject lunch/off-list times',()=>{
   const b=createBackend(),slots=b.post('getTimeSlots').data;
   assert.equal(slots[0],'09:00');assert.equal(slots.at(-1),'21:30');assert.ok(!slots.includes('12:30'));

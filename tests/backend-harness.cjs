@@ -16,10 +16,11 @@ function createBackend() {
   for(let minutes=9*60;minutes<=21*60+30;minutes+=30) if(minutes!==12*60+30) data.Lists.push(['','','','',`${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')}`,'']);
   const formulas=Object.fromEntries(Object.keys(schemas).map(name=>[name,new Map()]));
   const props = new Map([['ADMIN_PASSWORD','test-only-password-123']]), cache = new Map(); let writes=0, locked=false, failure=null;
+  const formatErrors = new Map();
   const sheets=Object.fromEntries(Object.keys(data).map(name=>{
     const sheet={ getLastColumn:()=>data[name][0].length, getLastRow:()=>data[name].length, getMaxRows:()=>1000, insertRowsAfter:()=>{}, getMaxColumns:()=>26,insertColumnsAfter:()=>{},
       getRange:(r,c,n=1,m=1)=>{
-        const range={getValues:()=>Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=>data[name][r+i-1]?.[c+j-1]??'')), getDisplayValues:()=>range.getValues().map(row=>row.map(v=>v===true?'TRUE':v===false?'FALSE':String(v))), setNumberFormat:()=>range,
+        const range={getValues:()=>Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=>data[name][r+i-1]?.[c+j-1]??'')), getDisplayValues:()=>range.getValues().map(row=>row.map(v=>v===true?'TRUE':v===false?'FALSE':String(v))), setNumberFormat:()=>{const error=formatErrors.get(`${name}:${c}`);if(error)throw new Error(error);return range;},
           getFormulas:()=>Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=>formulas[name].get(`${r+i},${c+j}`)||'')),
           setValues:values=>{if(failure&&failure({name,row:r,column:c,values,writes})){failure=null;throw new Error('Injected sheet write failure');}writes++; values.forEach((row,i)=>{ data[name][r+i-1] ||= []; row.forEach((v,j)=>{data[name][r+i-1][c+j-1]=v;formulas[name].delete(`${r+i},${c+j}`);}); }); return range;}, setValue:v=>range.setValues([[v]])}; return range;
       }, getDataRange:()=>sheet.getRange(1,1,data[name].length,data[name][0].length)};
@@ -38,6 +39,6 @@ function createBackend() {
   vm.runInContext(fs.readFileSync('apps-script/Code.gs','utf8'),context);
   const post=(action,payload={},token)=>JSON.parse(context.doPost({postData:{contents:JSON.stringify({action,payload,token})}}).text);
   const setFormula=(name,row,col,formula,value='')=>{formulas[name].set(`${row},${col}`,formula);data[name][row-1]||=[];data[name][row-1][col-1]=value;};
-  return {data,props,post,context,formulas,setFormula,failNextWrite:predicate=>failure=predicate,writes:()=>writes};
+  return {data,props,post,context,formulas,setFormula,formatErrors,failNextWrite:predicate=>failure=predicate,writes:()=>writes};
 }
 module.exports={createBackend};
