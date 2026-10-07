@@ -37,10 +37,10 @@ test('existing student can register a future next level in typed columns and ret
   }
 });
 
-test('pending enrollment recovers from a formatting failure without duplicating saved metadata',()=>{
+test('pending enrollment recovers from a write failure without duplicating saved metadata',()=>{
   const b=createBackend(),p=enrollment(1,{StudentID:'STU001',requestId:'recover-format'});
-  b.formatErrors.set('Schedule:3','Spreadsheet temporarily unavailable');
-  const failed=b.post('saveEnrollment',p);assert.equal(failed.success,false);assert.match(failed.message,/temporarily unavailable/);
+  b.failNextWrite(({name})=>name==='Schedule');
+  const failed=b.post('saveEnrollment',p);assert.equal(failed.success,false);assert.match(failed.message,/Injected sheet write failure/);
   assert.equal(b.data.Enrollments.length,4);assert.equal(b.data.Schedule.length,2);
   b.formatErrors.set('Schedule:3',"Can't set the number format of cells in a typed column.");
   const recovered=b.post('saveEnrollment',p);assert.equal(recovered.success,true,recovered.message);
