@@ -9,11 +9,116 @@
     <link rel="stylesheet" href="css/style.css?v=2.3.0">
     <link rel="stylesheet" href="css/calendar-groups.css?v=2.3.0">
     <link rel="stylesheet" href="css/student-search.css?v=2.3.0">
-<link rel="stylesheet" href="css/finance.css?v=3.0.2"></head>
+<link rel="stylesheet" href="css/finance.css?v=3.0.2">
+    <!-- BRLC: Collapsible navigation overlay (desktop / tablet / mobile) -->
+    <style>
+        :root { --brlc-header-height: 62px; }
+
+        /* Persistent top bar, including desktop. */
+        .mobile-header {
+            display: flex !important;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 14px;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: var(--brlc-header-height);
+            width: 100%;
+            padding: 0 18px;
+            background: var(--color-navy, #14243f);
+            color: #fff;
+            z-index: 120;
+            box-shadow: 0 2px 9px rgba(0, 0, 0, .12);
+        }
+        .mobile-header .logo {
+            font-weight: 600;
+            font-size: 1.08rem;
+            line-height: 1.2;
+            white-space: nowrap;
+        }
+        .mobile-header .header-admin-label {
+            margin-left: 8px;
+            font-weight: 400;
+            font-size: .82rem;
+            color: #bed7ff;
+        }
+        .mobile-header #menu-toggle {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            width: 42px;
+            height: 42px;
+            border: 1px solid rgba(255, 255, 255, .25);
+            border-radius: 9px;
+            background: rgba(255, 255, 255, .08);
+            color: white;
+            cursor: pointer;
+            transition: background .2s ease;
+        }
+        .mobile-header #menu-toggle:hover { background: rgba(255, 255, 255, .2); }
+        .mobile-header #menu-toggle:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+
+        /* Slide-over menu: no space is permanently reserved beside the calendar. */
+        .sidebar {
+            width: min(280px, 86vw) !important;
+            top: var(--brlc-header-height) !important;
+            height: calc(100vh - var(--brlc-header-height)) !important;
+            height: calc(100dvh - var(--brlc-header-height)) !important;
+            overflow-y: auto;
+            transform: translateX(-105%) !important;
+            visibility: hidden;
+            transition: transform .25s ease, visibility .25s ease !important;
+            z-index: 110 !important;
+            box-shadow: 6px 0 18px rgba(0, 0, 0, .14);
+        }
+        .sidebar.open {
+            transform: translateX(0) !important;
+            visibility: visible;
+        }
+        .sidebar-backdrop {
+            position: fixed;
+            inset: var(--brlc-header-height) 0 0 0;
+            background: rgba(12, 22, 38, .38);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            z-index: 105;
+            transition: opacity .25s ease, visibility .25s ease;
+        }
+        .sidebar.open + .sidebar-backdrop {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+        }
+
+        /* Expand the calendar and other pages to the browser width. */
+        .main-content {
+            margin-left: 0 !important;
+            width: 100% !important;
+            min-width: 0;
+            max-width: 100%;
+            padding-top: calc(var(--brlc-header-height) + 24px);
+        }
+        @media (max-width: 768px) {
+            .main-content { padding: calc(var(--brlc-header-height) + 14px) 12px 24px !important; }
+            .mobile-header { padding-left: 12px; padding-right: 12px; }
+        }
+        @media (max-width: 380px) {
+            .mobile-header .header-admin-label { display: none; }
+            .mobile-header .logo { font-size: .98rem; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .sidebar, .sidebar-backdrop { transition: none !important; }
+        }
+    </style>
+</head>
 <body>
     <div class="mobile-header">
-        <div class="logo">Boston Robotics</div>
-        <button id="menu-toggle" aria-label="เปิดเมนู"><i class="fas fa-bars"></i></button>
+        <button id="menu-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="เปิดเมนูนำทาง" title="เปิด/ปิดเมนู"><i class="fas fa-bars" aria-hidden="true"></i></button>
+        <div class="logo">BostonRobotics <span class="header-admin-label">Admin System</span></div>
     </div>
 
     <aside class="sidebar" id="sidebar">
@@ -30,6 +135,7 @@
             <li><a href="#" data-target="holidays"><i class="fas fa-umbrella-beach"></i> วันหยุด</a></li>
 <li><a href="#" data-target="finance"><i class="fas fa-chart-line"></i> รายงานการเงิน</a></li><li><a href="#" data-target="receipts"><i class="fas fa-receipt"></i> ออกใบเสร็จรับเงิน</a></li></ul>
     </aside>
+    <div class="sidebar-backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
 
     <main class="main-content">
         <div class="app-toolbar"><strong>BostonRobotics AdminSystem</strong><button id="refresh-data" class="btn btn-secondary">โหลดข้อมูลใหม่</button></div>
@@ -255,5 +361,44 @@
     <script src="js/student-search.js?v=2.3.0"></script>
     <script src="js/schedule-export.js?v=2.3.2"></script>
     <script src="js/app.js?v=3.0.5"></script>
-<script src="js/finance-config.js?v=3.0.0"></script><script src="js/finance-domain.js?v=3.0.0"></script><script src="js/receipt-layout.js?v=3.0.2"></script><script src="js/finance.js?v=3.0.2"></script></body>
+<script src="js/finance-config.js?v=3.0.0"></script><script src="js/finance-domain.js?v=3.0.0"></script><script src="js/receipt-layout.js?v=3.0.2"></script><script src="js/finance.js?v=3.0.2"></script>
+    <!-- BRLC: Keep navigation state and accessibility in sync with existing app.js -->
+    <script>
+    (function () {
+        const sidebar = document.getElementById('sidebar');
+        const button = document.getElementById('menu-toggle');
+        const backdrop = document.getElementById('sidebar-backdrop');
+        if (!sidebar || !button || !backdrop) return;
+
+        function syncNavigation() {
+            const expanded = sidebar.classList.contains('open');
+            button.setAttribute('aria-expanded', String(expanded));
+            button.setAttribute('aria-label', expanded ? 'ปิดเมนูนำทาง' : 'เปิดเมนูนำทาง');
+            sidebar.setAttribute('aria-hidden', String(!expanded));
+            const icon = button.querySelector('i');
+            if (icon) {
+                icon.classList.toggle('fa-bars', !expanded);
+                icon.classList.toggle('fa-times', expanded);
+            }
+        }
+
+        // app.js already toggles .open when the existing #menu-toggle is clicked.
+        // Observe that class to avoid adding a conflicting second click handler.
+        new MutationObserver(syncNavigation).observe(sidebar, {
+            attributes: true,
+            attributeFilter: ['class']
+        });
+        backdrop.addEventListener('click', function () {
+            sidebar.classList.remove('open');
+        });
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && sidebar.classList.contains('open')) {
+                sidebar.classList.remove('open');
+                button.focus();
+            }
+        });
+        syncNavigation();
+    }());
+    </script>
+</body>
 </html>
