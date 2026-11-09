@@ -1,13 +1,17 @@
-// BostonRobotics Finance API 1.0. Deploy as a NEW standalone Apps Script project.
-// Passwordless access is intentional, as requested by the owner.
+// BostonRobotics Finance API 1.0 - passwordless API for the existing GitHub Pages UI.
+// WARNING: Deploying as "Anyone" exposes read/write access to people who know the URL.
+// Do NOT combine with Code.gs from BostonFinance 1.1; replace that file after backing it up.
 const FINANCE_DB='1OSrFdehq7o1IrASmkTcbtSylCo49erUyzn_xCAJnn9Q';
 const RECEIPT_DB='1t4tLaAS4sYRtVZ4podFh1OdSaqnqzAtJBVR7whetJ-Q';
 const TX_HEADERS=['date','type','category','amount','note','id','status','created_at','updated_at','updated_by','payment_method','reference','attachment_url','revision','history_json'];
 const RECEIPT_HEADERS=['Timestamp','ReceiptNo','StudentName','ParentName','CourseLevel','CourseDetail','CoursePrice','AddOnItem','AddOnDetail','AddOnPrice','Discount','NetTotal','ReceiptDate','Status','RequestID','StudentID','EnrollmentID','Level','PaymentMethod','TransactionID'];
 function json_(v){return ContentService.createTextOutput(JSON.stringify(v)).setMimeType(ContentService.MimeType.JSON);}
 function doGet(){return json_({success:true,service:'boston-finance',version:'1.0',authMode:'none'});}
-function doPost(e){try{const r=JSON.parse(e.postData.contents);if(r.action==='getFinance')return json_({success:true,transactions:read_(FINANCE_DB,'Transactions',TX_HEADERS),receipts:read_(RECEIPT_DB,'Data1',RECEIPT_HEADERS.slice(0,14))});
-  const lock=LockService.getScriptLock();if(!lock.tryLock(20000))throw Error('มีรายการกำลังบันทึก กรุณาลองใหม่');
+function doPost(e){try{
+  const r=JSON.parse(e.postData.contents);
+  if(r.action==='getFinance')return json_({success:true,transactions:read_(FINANCE_DB,'Transactions',TX_HEADERS),receipts:read_(RECEIPT_DB,'Data1',RECEIPT_HEADERS.slice(0,14))});
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(20000))throw Error('มีรายการกำลังบันทึก กรุณาลองใหม่');
   try {let result;if(r.action==='saveTransaction')result=saveTransaction_(r.payload||{});else if(r.action==='saveReceipt')result=saveReceipt_(r.payload||{});else throw Error('ไม่พบคำสั่ง');return json_({success:true,data:result});}finally{lock.releaseLock();}
 }catch(err){return json_({success:false,code:/^(จำนวนเงิน|วันที่ไม่ถูกต้อง|บันทึกเงินที่รับ|ข้อความยาวเกิน 2000|รหัสคำขอ|กรุณากรอกชื่อนักเรียน|ยอดรับเงินสุทธิ|กรุณาเลือกหมวด|ประเภทรายการ|เลขอ้างอิง BR-)/.test(err.message)?'VALIDATION_ERROR':'RETRY_OR_REVIEW',message:err.message});}}
 function table_(id,name,required,extend){const s=SpreadsheetApp.openById(id).getSheetByName(name);if(!s)throw Error('ไม่พบชีต '+name);let h=s.getRange(1,1,1,s.getLastColumn()).getDisplayValues()[0].map(x=>String(x).trim());required.forEach(k=>{if(!h.includes(k)){if(!extend)throw Error('ไม่พบคอลัมน์ '+k);if(h.length>=s.getMaxColumns())s.insertColumnsAfter(s.getMaxColumns(),1);s.getRange(1,h.length+1).setValue(k);h.push(k);}});return {s,h};}
