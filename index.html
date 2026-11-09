@@ -361,7 +361,18 @@
     <script src="js/student-search.js?v=2.3.0"></script>
     <script src="js/schedule-export.js?v=2.3.2"></script>
     <script src="js/app.js?v=3.0.5"></script>
-<script src="js/finance-config.js?v=3.0.0"></script><script src="js/finance-domain.js?v=3.0.0"></script><script src="js/receipt-layout.js?v=3.0.2"></script><script src="js/finance.js?v=3.0.2"></script>
+<!-- Finance connection update 2026-11-09: retire stale per-browser API URLs -->
+<script>
+  (function () {
+    try {
+      var key = 'boston-finance-endpoint';
+      var oldUrl = localStorage.getItem(key);
+      var correctUrl = 'https://script.google.com/macros/s/AKfycbxHbwHBTidtjtVIscPYz-OUDakw_YYWQtYCw3ptKaiYkk1MPZgVF9BiE5yfvXqFiTAC/exec';
+      if (oldUrl && oldUrl !== correctUrl) localStorage.removeItem(key);
+    } catch (e) { /* storage may be disabled; use config.js */ }
+  }());
+</script>
+<script src="js/finance-config.js?v=3.1.0"></script><script src="js/finance-domain.js?v=3.0.0"></script><script src="js/receipt-layout.js?v=3.0.2"></script><script src="js/finance.js?v=3.1.0"></script>
     <!-- BRLC: Keep navigation state and accessibility in sync with existing app.js -->
     <script>
     (function () {
