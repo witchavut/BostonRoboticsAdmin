@@ -1,3 +1,3 @@
-// Paste the /exec URL from the NEW finance Apps Script deployment here once.
-// This is separate from the existing calendar API in js/app.js.
-window.BostonFinanceConfig = { apiUrl: 'https://script.google.com/macros/s/AKfycbyGNG5MrLyP-LGFtK49_ePr3E2T0TFSYmB2MXdHnGRUm_igy3ypITRQYiJFU1yLkalH/exec' };
+// BostonRobotics Finance API URL (passwordless bridge for report + receipts)
+// Update the URL here only if you create a NEW Apps Script deployment.
+window.BostonFinanceConfig = { apiUrl: 'https://script.google.com/macros/s/AKfycbxHbwHBTidtjtVIscPYz-OUDakw_YYWQtYCw3ptKaiYkk1MPZgVF9BiE5yfvXqFiTAC/exec' };
